@@ -1,0 +1,265 @@
+@import "tailwindcss";
+
+/* Fluent 2 design tokens (Microsoft) — dùng cho giao diện kiểu Dynamics 365 Sales Hub */
+:root {
+  --brand: #0f6cbd;
+  --brand-hover: #115ea3;
+  --brand-pressed: #0c3b5e;
+  --brand-tint: #ebf3fc;
+  --brand-tint-2: #cfe4fa;
+  --header: #0f6cbd;
+  --bg: #f5f5f5;
+  --surface: #ffffff;
+  --surface-2: #fafafa;
+  --surface-hover: #f0f0f0;
+  --surface-pressed: #e0e0e0;
+  --stroke: #e0e0e0;
+  --stroke-strong: #d1d1d1;
+  --stroke-accessible: #616161;
+  --text: #242424;
+  --text-2: #424242;
+  --text-3: #616161;
+  --text-4: #707070;
+  --success: #107c10;
+  --success-tint: #f1faf1;
+  --warning: #bc4b09;
+  --warning-tint: #fff9f5;
+  --danger: #c50f1f;
+  --danger-tint: #fdf3f4;
+  --info-tint: #f5f5f5;
+  --shadow-2: 0 0 2px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.14);
+  --shadow-4: 0 0 2px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.14);
+  --shadow-16: 0 0 2px rgba(0, 0, 0, 0.12), 0 8px 16px rgba(0, 0, 0, 0.14);
+  --radius: 4px;
+  --radius-lg: 8px;
+}
+
+@theme inline {
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-tint: var(--brand-tint);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-stroke: var(--stroke);
+  --color-ink: var(--text);
+  --color-ink-2: var(--text-2);
+  --color-ink-3: var(--text-3);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--stroke-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.btn:hover {
+  background: var(--surface-hover);
+  border-color: #c7c7c7;
+}
+.btn:active {
+  background: var(--surface-pressed);
+}
+.btn:disabled {
+  background: #f0f0f0;
+  border-color: #e0e0e0;
+  color: #bdbdbd;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--brand);
+  border-color: transparent;
+  color: #fff;
+}
+.btn-primary:hover {
+  background: var(--brand-hover);
+  border-color: transparent;
+}
+.btn-primary:active {
+  background: var(--brand-pressed);
+}
+.btn-danger {
+  color: var(--danger);
+}
+.btn-sm {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 400;
+}
+.btn-subtle {
+  border-color: transparent;
+  background: transparent;
+  font-weight: 400;
+}
+.btn-subtle:hover {
+  background: var(--surface-hover);
+  border-color: transparent;
+}
+
+/* Command bar (thanh lệnh kiểu Dynamics 365) */
+.cmd {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: var(--radius);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cmd:hover {
+  background: var(--surface-hover);
+}
+.cmd:active {
+  background: var(--surface-pressed);
+}
+.cmd svg {
+  color: var(--brand);
+}
+.cmd:disabled {
+  color: #bdbdbd;
+  cursor: not-allowed;
+}
+.cmd:disabled svg {
+  color: #bdbdbd;
+}
+
+/* ---------- Inputs (Fluent v9: viền dưới đậm, focus gạch xanh) ---------- */
+.input,
+.select,
+.textarea {
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--stroke-strong);
+  border-bottom-color: var(--stroke-accessible);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+}
+.textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+.input:hover,
+.select:hover,
+.textarea:hover {
+  border-color: #c7c7c7;
+  border-bottom-color: #575757;
+}
+.input:focus,
+.select:focus,
+.textarea:focus {
+  border-bottom: 2px solid var(--brand);
+  padding-bottom: 4px;
+}
+.input:disabled,
+.select:disabled,
+.textarea:disabled {
+  background: #fafafa;
+  color: #9e9e9e;
+  border-color: #e0e0e0;
+}
+.label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.label .req {
+  color: var(--danger);
+  margin-left: 2px;
+}
+.hint {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+input[type="checkbox"] {
+  accent-color: var(--brand);
+  width: 16px;
+  height: 16px;
+}
+
+/* ---------- Data grid ---------- */
+.grid-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 14px;
+}
+.grid-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-2);
+  font-size: 12px;
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--stroke);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  white-space: nowrap;
+}
+.grid-table td {
+  height: 42px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  vertical-align: middle;
+}
+.grid-table tbody tr:hover td {
+  background: var(--surface-hover);
+}
+.grid-table a.link,
+a.link {
+  color: var(--brand);
+}
+a.link:hover {
+  text-decoration: underline;
+  color: var(--brand-hover);
+}
