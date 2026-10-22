@@ -119,7 +119,7 @@ Có thể bắt đầu một WP trước khi WP nó phụ thuộc xong, **nếu 
   - Lịch sử chuyển giai đoạn (`opportunity_stage_history`); kết quả đánh giá do NVKD xác nhận (`lead_assessments`).
   - Xử lý rủi ro với 3 trạng thái Đã xử lý / Hoàn thành / Bỏ qua kèm lý do (HG5).
   - Rà soát của QLKD (HG6, BR-06). 4 mục kiểm soát và chuyển giai đoạn.
-  - Đóng và mở lại cơ hội (BR-17). Kanban cơ hội.
+  - Đóng và mở lại cơ hội (BR-17); đóng thất bại bắt buộc chọn lý do theo danh mục BR-27. Kanban cơ hội.
 - **Hợp đồng cho WP khác:**
   - Panel Qualify cắm vào slot của WP-01.
   - `getOpportunityForQuote(oppId)` cho WP-04.
@@ -196,6 +196,12 @@ Bài đã chuyển 6 FR có Agent vào bảng nghiệp vụ (khách hàng, cơ h
   - Dữ liệu bên ngoài phải bọc `untrusted_data`.
   - Có chế độ `mock` cho test và demo.
   - Adapter **OpenAI** là mặc định (DEC-12); chuyển code Claude hiện có trong `src/lib/agents/runtime.ts` về sau interface `LlmProvider`.
+- **Vận hành Agent (đáp ứng mục 2.7 của bài):**
+  - *Ghi log (2.7.1):* mỗi lần chạy ghi `config_id`, token vào/ra, số lượt tìm web, `latency_ms`, `cost` vào `ai_runs`; mỗi lần gọi công cụ một dòng `tool_calls` với `outcome` OK / ERROR / DENIED; che dữ liệu cá nhân và không ghi khoá (DEC-28).
+  - *Giám sát (2.7.1):* trang Giám sát AI cho AI_MANAGER: danh sách lần chạy lọc theo Agent, trạng thái, khoảng ngày; biểu đồ token theo ngày so với ngân sách; tỷ lệ lỗi 24 giờ; các lần DENIED. Cảnh báo theo BR-23 tạo `notifications` cho AI_MANAGER. Job dọn lần chạy treo quá `ai_run_timeout_sec` (gọi cùng `/api/cron/agents`).
+  - *Chi phí, giới hạn (2.7.3):* trước mỗi lần chạy kiểm ngân sách ngày còn lại (BR-16); trong lần chạy dừng khi vượt token, số vòng hoặc số lượt tìm web (BR-24); một `(agent, hồ sơ)` chỉ có một lần chạy RUNNING, trigger lặp trong 60 giây gộp lại, sửa trường trọng yếu liên tục thì debounce 2 phút; chi phí tính từ đơn giá trong settings, chưa có đơn giá thì để trống.
+  - *Chất lượng (2.7.2):* trạng thái EDITED cho đề xuất và bản nghiên cứu, cờ `edited_by_human` cho email; báo cáo tuần tỷ lệ con người sửa (BR-26), tỷ lệ "Bàn giao sai chuẩn" (BR-27), phản hồi `ai_feedback` (FR-90, FR-95).
+  - *Cập nhật prompt, model, tri thức (2.7.4):* trang Cấu hình AI quản lý phiên bản `agent_configs` theo DEC-27: tạo DRAFT từ bản đang chạy, so sánh khác biệt, gắn kết quả eval, QLKD duyệt khi đổi tiêu chí, kích hoạt, rollback; chỉ chọn model trong `llm_allowed_models` (BR-25). Prompt trong code chỉ seed v1.
   - Thiết kế chi tiết: `docs/VIBECODE-GUIDE.md` mục 6, đánh giá ở mục 8.
 - **Phụ thuộc:** WP-01, WP-03 (sự kiện, hàm), WP-07 (`createWorkItem`).
 
@@ -225,7 +231,8 @@ Bài đã chuyển 6 FR có Agent vào bảng nghiệp vụ (khách hàng, cơ h
 - **Việc chính:**
   - E2E cho kịch bản demo (`docs/VIBECODE-GUIDE.md` mục 9, bỏ phần Pháp chế và Delivery).
   - Test cho 10 cổng ở `REQUIREMENTS.md`.
-  - Bộ đánh giá Agent (mục 8 của guide). Đo NFR-01, NFR-02.
+  - Bộ đánh giá Agent (mục 8 của guide), chạy được với một `agent_configs` cụ thể và ghi kết quả vào `eval_report_ref`, `eval_passed` của phiên bản đó (BR-25). Judge theo DEC-29. Đo NFR-01, NFR-02 (p95 thời gian một lần chạy).
+  - Test cho phần vận hành Agent: chặn khi hết ngân sách (BR-16), dừng khi vượt giới hạn mỗi lần chạy (BR-24), dọn lần chạy treo và cảnh báo (BR-23), log không chứa khoá hay email chưa che (DEC-28), không kích hoạt được phiên bản chưa qua eval (BR-25), rollback trả lại đúng phiên bản cũ.
   - Báo cáo `npm run fr:coverage`.
 - **Không sửa code nghiệp vụ.** Phát hiện lỗi thì ghi vào `docs/handoff/BUGS.md` để WP sở hữu sửa.
 

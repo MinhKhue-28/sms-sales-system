@@ -47,10 +47,11 @@ Mã FR theo bản đọc ngày 22/10/2026.
 | Hoá đơn, thanh toán, công nợ (FR-64 → FR-74) | Xem; đề nghị điều chỉnh; phối hợp nhắc | — | — | Xem | **Ghi** | — | — |
 | Đội ngũ, nhóm, chỉ tiêu, phân công (FR-75 → FR-87) | Xem việc và KPI của mình; tạo việc của mình | Xem việc của mình | — | **Ghi** | — | — | — |
 | Đề xuất của Agent: nghiên cứu Lead, duyệt email, đọc phản hồi, đề xuất đánh giá, xác minh nghiên cứu, hành động ưu tiên (FR-06, FR-19, FR-20, FR-32, FR-36, FR-44) | **Duyệt** (hồ sơ mình phụ trách) | Xem, phản hồi | — | Duyệt | — | — | — |
-| Cấu hình nghiệp vụ Agent: TCP, tiêu chí, chế độ, lịch, điều kiện chạy (FR-88, FR-89) | Ghi nếu được cấp | — | — | **Ghi** (DEC-24) | — | — | Xem |
-| Giám sát và phản hồi chất lượng (FR-90) | Phản hồi | Phản hồi | — | Xem, giám sát | — | — | Xem |
-| Cấu hình kỹ thuật Agent: prompt, mô hình, ngân sách, công cụ, lần chạy lỗi (FR-91, FR-93, FR-94) | — | — | — | — | — | — | **Ghi** (DEC-24) |
-| Quyền dữ liệu và quyền ghi của Agent (FR-92) | — | — | — | — | — | **Ghi** | Xem tuân thủ |
+| Cấu hình Agent: chế độ, phạm vi, TCP, tiêu chí, lịch, sự kiện làm mới (FR-88, FR-89) | Ghi nếu được cấp riêng | — | — | Xem | — | — | **Ghi** (DEC-24) |
+| Duyệt tiêu chí nghiệp vụ trước khi kích hoạt phiên bản cấu hình (BR-25) | — | — | — | **Duyệt** | — | — | Trình |
+| Giám sát, cảnh báo và phản hồi chất lượng (FR-90, BR-23) | Phản hồi | Phản hồi | — | Xem | — | — | **Xem, nhận cảnh báo** |
+| Hướng dẫn, mô hình, ngân sách, công cụ, lần chạy lỗi, kích hoạt và rollback cấu hình (FR-91, FR-93, FR-94, DEC-27) | — | — | — | — | — | — | **Ghi** (DEC-24) |
+| Phạm vi dữ liệu, công cụ, thông tin xác thực, quyền ghi của Agent (FR-89, FR-92, FR-93) | — | — | — | — | — | **Ghi** | Xem tuân thủ |
 | Báo cáo hiệu quả Agent (FR-95) | — | — | — | Xem | — | — | **Xem** |
 | Tài khoản, phân quyền, phạm vi dữ liệu (FR-96 → FR-98) | — | — | — | — | — | **Ghi** | — |
 | Báo cáo phễu, dự báo (FR-99) | Của mình | — | — | **Xem** | — | — | — |

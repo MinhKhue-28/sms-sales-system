@@ -20,7 +20,7 @@ Nguồn: mục 2.4.3 và tab *Phụ lục ERD* (mã Mermaid đầy đủ, 61 th�
 | AFFILIATION | `affiliations` | Mới | WP-01 | `contact_id`, `account_id`, `job_title`, `valid_from`, `valid_to`; tối đa một dòng đang hiệu lực mỗi người |
 | LEAD | `leads` | Có | WP-01 | Thêm `topic`, `account_id`, `contact_id`, `deleted_at`, `merged_into_lead_id`. Cột `bant_*` chỉ là bản sao của đánh giá mới nhất trong `lead_assessments` |
 | ASSESSMENT | `lead_assessments` | Mới | WP-03 | Kết quả đánh giá do NVKD xác nhận; `ai_result_id` trỏ tới đề xuất AI đã dùng (nếu có) |
-| INTERACTION | `activities` + `email_messages` | Có | WP-01 (`activities`), WP-08 (`email_messages`) | Gộp: ghi chú, cuộc gọi, họp ở `activities`; email ở `email_messages`. `email_messages` thêm `status` DRAFT / APPROVED / SENT / FAILED, `content_snapshot`, `approved_at`, `direction`, `contact_id` |
+| INTERACTION | `activities` + `email_messages` | Có | WP-01 (`activities`), WP-08 (`email_messages`) | Gộp: ghi chú, cuộc gọi, họp ở `activities`; email ở `email_messages`. `email_messages` thêm `status` DRAFT / APPROVED / SENT / FAILED, `content_snapshot` (nội dung được duyệt và gửi), `edited_by_human` (khác bản nháp của Agent trong `ai_suggestions`, dùng cho BR-26), `approved_at`, `direction`, `contact_id` |
 | DOCUMENT | `documents` | Mới | WP-00 | Có phiên bản (`previous_version_id`, `version_no`, `checksum`); `signature_status` cho FR-55 |
 | DOCUMENT_LINK | `document_links` | Mới | WP-00 | Đúng một FK đích (Lead, cơ hội, phiên bản báo giá, đơn, hoá đơn, tương tác) |
 | TAG | `tags` | Mới | WP-01 | |
@@ -30,7 +30,7 @@ Nguồn: mục 2.4.3 và tab *Phụ lục ERD* (mã Mermaid đầy đủ, 61 th�
 
 | Thực thể ERD | Bảng | Trạng thái | WP | Ghi chú |
 |---|---|---|---|---|
-| OPPORTUNITY | `opportunities` | Có | WP-03 | `name` = topic, `amount` = estimated_revenue, `close_date` = expected_close_date, `lead_id` = source_lead_id (UNIQUE khi có), `lost_reason` = close_reason. 4 cột xác nhận mục kiểm soát đã có. Thêm `budget` |
+| OPPORTUNITY | `opportunities` | Có | WP-03 | `name` = topic, `amount` = estimated_revenue, `close_date` = expected_close_date, `lead_id` = source_lead_id (UNIQUE khi có), `lost_reason` = close_reason (ghi chú). 4 cột xác nhận mục kiểm soát đã có. Thêm `budget`, `lost_reason_code` theo danh mục BR-27 |
 | STAKEHOLDER | `stakeholders` | Có | WP-03 | UNIQUE (`opportunity_id`, `contact_id`, `role`); một người nhiều vai trò (BR-19) |
 | OPPORTUNITY_ITEM | `opportunity_items` | Mới | WP-03 | Cấu hình dự kiến: sản phẩm, số lượng, license, kỳ hạn, đơn giá ước tính |
 | COMPETITOR | `competitors` | Có | WP-03 | |
@@ -76,13 +76,13 @@ Nguồn: mục 2.4.3 và tab *Phụ lục ERD* (mã Mermaid đầy đủ, 61 th�
 | Thực thể ERD | Bảng | Trạng thái | WP | Ghi chú |
 |---|---|---|---|---|
 | AGENT | `agents` | Mới | WP-08 | 2 dòng cố định: QUALIFICATION, OPPORTUNITY |
-| AGENT_CONFIG | `agent_configs` | Mới | WP-08 | Có phiên bản: prompt, model, tiêu chí, lịch, ngân sách; một bản đang hiệu lực mỗi Agent; rollback = kích hoạt bản cũ |
-| AGENT_RUN | `ai_runs` | Có | WP-08 | Thêm `config_id`, `retry_of_run_id`, `idempotency_key`, `token_usage`, `cost`. Đúng một trong Lead hoặc cơ hội |
-| AI_RESULT | `ai_suggestions` + `opportunity_research` | Có | WP-08 | Gộp: đề xuất của Qualification Agent ở `ai_suggestions`; bản nghiên cứu của Opportunity Agent ở `opportunity_research` |
+| AGENT_CONFIG | `agent_configs` | Mới | WP-08 | **Nguồn chính** của prompt, model, tiêu chí, lịch, ngân sách (DEC-27). Cột: `agent_id`, `version_no`, `instructions`, `model_reference`, `criteria_snapshot`, `schedule_rule`, `budget_limit`, `status` DRAFT / ACTIVE / RETIRED, `eval_report_ref`, `eval_passed`, `configured_by`, `business_approved_by` (QLKD, khi đổi tiêu chí nghiệp vụ), `effective_at`. Mỗi Agent đúng một bản ACTIVE. Kích hoạt theo BR-25; rollback = kích hoạt lại bản cũ |
+| AGENT_RUN | `ai_runs` | Có | WP-08 | Thêm `config_id`, `retry_of_run_id`, `idempotency_key`, `input_tokens`, `output_tokens`, `web_search_calls`, `latency_ms`, `cost` (tính theo BR-24, để trống khi chưa có đơn giá). Đúng một trong Lead hoặc cơ hội. Trạng thái FAILED kèm lý do, gồm cả "Quá thời gian" và "Hết ngân sách" (BR-23, BR-24) |
+| AI_RESULT | `ai_suggestions` + `opportunity_research` | Có | WP-08 | Gộp: đề xuất của Qualification Agent ở `ai_suggestions`; bản nghiên cứu của Opportunity Agent ở `opportunity_research`. Cả hai thêm trạng thái **EDITED** (người sửa rồi mới dùng) và lưu bản gốc của Agent (`payload_json`, `summary`) nguyên vẹn để tính tỷ lệ sửa (BR-26) |
 | AI_EVIDENCE | `ai_evidence` | Mới | WP-08 | Thay dần `evidence_json`, `sources_json`. Mỗi căn cứ có ít nhất email, tài liệu hoặc URL, và thời điểm lấy |
 | TOOL | `tools` | Mới | WP-08 | |
 | TOOL_GRANT | `tool_grants` | Mới | WP-08 | Công cụ được cấp cho từng `agent_configs`; ADMIN cấp quyền dữ liệu (FR-92) |
-| TOOL_CALL | `tool_calls` | Mới | WP-08 | Thay `ai_runs.tool_calls_json` |
+| TOOL_CALL | `tool_calls` | Mới | WP-08 | Thay `ai_runs.tool_calls_json`. Cột `outcome` OK / ERROR / **DENIED** (bị chặn vì quyền, tách khỏi lỗi thường), `input_redacted`, `output_summary`, `duration_ms`, `authorization_snapshot`. Đầu vào và đầu ra đã che dữ liệu cá nhân, không bao giờ chứa khoá API (DEC-28) |
 | AI_FEEDBACK | `ai_feedback` | Mới | WP-08 | FR-90 |
 
 ## ERD-06. Nhân sự, phân công và quyền truy cập

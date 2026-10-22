@@ -265,7 +265,7 @@ Mỗi máy trạng thái được khai báo **một lần** trong `src/lib/domai
 - Không dùng `tool_choice` dạng `any` hoặc `tool` (Opus 5.5 trả 400). Dùng `auto` và chỉ dẫn trong prompt.
 - Bật fallback khi bị từ chối: `betas: ["server-side-fallback-2026-07-01"]`, `fallbacks: "default"` (đã có trong `runtime.ts`). Luôn kiểm tra `stop_reason` (`refusal`, `max_tokens`, `pause_turn`) trước khi đọc kết quả.
 - Vòng lặp: Tool Runner (`client.beta.messages.toolRunner`), `max_iterations: 15`, `max_tokens: 16000`.
-- Ghi vào `ai_runs`: trigger, model, `prompt_version`, danh sách tool call (input rút gọn và kết quả), usage tokens, độ trễ, chi phí ước tính (Opus 5.5: $4 / 1M token input, $20 / 1M token output).
+- Ghi vào `ai_runs`: trigger, model, `config_id` (phiên bản cấu hình, DEC-27), token vào/ra, số lượt tìm web, `latency_ms`, chi phí tính theo đơn giá OpenAI trong settings (BR-24). Mỗi tool call ghi một dòng `tool_calls` (OK / ERROR / DENIED, đầu vào đã che theo DEC-28). Cột cụ thể: `docs/requirements/DATA-MODEL.md`.
 - **Chế độ mock** (`SMS_AI_MODE=mock` hoặc không có key): `agents/mock.ts` chạy cùng bộ tool và cùng luật quyết định nhưng bằng luật cứng. Dùng cho demo offline, test tự động và làm **baseline** khi đánh giá.
 - Chống chạy trùng: mỗi `(agent, entity)` chỉ có một run RUNNING cùng lúc. Trigger lặp trong 60 giây thì gộp lại.
 - Chống prompt injection: mọi dữ liệu bên ngoài bọc `untrusted_data`. Test đỏ ở Phase 8 phải chứng minh Agent không làm theo chỉ dẫn nằm trong email hay ghi chú.
@@ -535,7 +535,7 @@ Phase 8 – Evaluation harness theo mục 8 của guide:
 1. Tạo scripts/eval/: dataset (JSON) cho 2 Agent, runner, graders, report.
 2. Runner: với mỗi case, dựng DB :memory: từ fixture, chạy Agent (mock và/hoặc claude), thu ai_suggestions / opportunity_research / tool calls / usage, rồi chấm.
 3. Graders tự động: kết luận, MAE BANT, hợp lệ trích dẫn, vi phạm quyền, tuân thủ schema, ≤3 hành động, NO_INSIGHT đúng, prompt injection.
-4. LLM judge (claude-opus-5-5, effort low, structured output) chỉ cho 2 tiêu chí mềm: chất lượng email và độ bám nguồn của insight; rubric ở mục 8.4.
+4. LLM judge (model OpenAI theo DEC-29, structured output) chỉ cho 2 tiêu chí mềm: chất lượng email và độ bám nguồn của insight; rubric ở mục 8.4.
 5. Lặp 3 lần mỗi case ở chế độ claude để đo độ ổn định.
 6. Xuất docs/eval/report-<ngày>.md + .json: bảng chỉ số, so mock vs claude, các case lỗi kèm lý do.
 7. E2E Playwright cho kịch bản demo mục 9 (chạy ở mock).
@@ -612,14 +612,17 @@ Tách 1/3 mỗi bộ làm tập **test giữ kín**. Chỉ chỉnh prompt dựa 
 | Chất lượng email | Judge, rubric 8.4, điểm trung bình 1–5 | ≥ 4.0 | Mục tiêu |
 | Độ ổn định | % case cho cùng kết luận ở cả 3 lần chạy | ≥ 85% | Mục tiêu |
 | Độ trễ mỗi lần chạy | p50 / p95 từ `ai_runs.latency_ms` | p95 ≤ 60 giây | Mục tiêu |
-| Chi phí mỗi lần chạy | Từ usage × đơn giá | Báo cáo con số (tham khảo: khoảng 20k token vào, 3k token ra, tương đương ≈ $0.14/lần với Opus 5.5) | Báo cáo |
-| Tỷ lệ con người sửa (vận hành) | `ai_suggestions.outcome` | Báo cáo theo tuần trên dashboard | Báo cáo |
+| Chi phí mỗi lần chạy | `ai_runs.cost` (token × đơn giá OpenAI trong settings, BR-24) | Báo cáo con số, kèm ngày tra đơn giá; không tự đoán đơn giá | Báo cáo |
+| Tỷ lệ con người sửa (vận hành) | Định nghĩa ở BR-26: email bị sửa trước khi duyệt, đề xuất bị từ chối, bản nghiên cứu bị sửa hoặc bác | Báo cáo theo tuần trên trang Giám sát AI | Báo cáo |
+| Bàn giao sai chuẩn (vận hành) | % cơ hội thất bại có lý do "Bàn giao sai chuẩn" (BR-27) | Báo cáo theo tháng; dùng làm phản hồi cho Qualification Agent (2.1.7c) | Báo cáo |
 
-Báo cáo luôn đặt **baseline mock** cạnh kết quả Claude, để chứng minh phần giá trị LLM thêm vào (ví dụ email cá nhân hoá, phát hiện rủi ro từ email, độ phủ insight).
+Báo cáo luôn đặt **baseline mock** cạnh kết quả mô hình OpenAI, để chứng minh phần giá trị LLM thêm vào (ví dụ email cá nhân hoá, phát hiện rủi ro từ email, độ phủ insight).
+
+**Chỉ số vận hành và ngưỡng cảnh báo** (giám sát hằng ngày, khác với bộ eval ở trên): tỷ lệ lần chạy lỗi, mức dùng token so với ngân sách, lần gọi công cụ bị chặn, lần chạy quá thời gian, kết quả thiếu căn cứ. Ngưỡng ở BR-23.
 
 ### 8.4 Rubric cho LLM judge
 
-Judge dùng `claude-opus-5-5`, `effort: "low"`, đầu ra có cấu trúc (`client.messages.parse` + `zodOutputFormat`). Judge nhận **nguồn dữ liệu** và **đầu ra của Agent**, không nhận nhãn.
+Judge là một model OpenAI trong `llm_allowed_models`, ưu tiên khác model của Agent (DEC-29), đầu ra có cấu trúc kiểm bằng Zod. Judge nhận **nguồn dữ liệu** và **đầu ra của Agent**, không nhận nhãn.
 
 Email (mỗi tiêu chí 1–5): (1) cá nhân hoá đúng ngành, công ty, chức danh; (2) định vị giá trị bám TCP; (3) CTA hẹn lịch rõ ràng; (4) giọng chuyên nghiệp, dưới 150 từ; (5) không có sự thật nào ngoài nguồn. Tiêu chí (5) = 1 thì tính là hallucination.
 
@@ -629,14 +632,14 @@ Kiểm tra lại judge: nhóm chấm tay 10 mẫu; judge phải khớp nhóm ít
 
 ### 8.5 Chi phí chạy eval
 
-45 case × 3 lần ≈ 135 lần chạy Agent, cộng khoảng 60 lần gọi judge. Ước tính dưới $25 với Opus 5.5. Runner phải in ước tính và hỏi xác nhận trước khi chạy chế độ `claude`. Chạy `mock` thì miễn phí.
+45 case × 3 lần ≈ 135 lần chạy Agent, cộng khoảng 60 lần gọi judge. Runner tính ước tính chi phí từ đơn giá OpenAI trong settings (BR-24), in ra và hỏi xác nhận trước khi chạy mô hình thật. Chạy `mock` thì miễn phí.
 
 ### 8.6 Đưa kết quả vào bài
 
-- Mục 2.7.1: danh sách sự kiện log lấy từ `ai_runs` và `audit_log`; ngưỡng cảnh báo lấy từ bảng 8.3.
-- Mục 2.7.2: bảng chỉ số và kết quả thật từ `docs/eval/report-*.md`.
-- Mục 2.7.3: chi phí và độ trễ đo được; cơ chế giới hạn (max_iterations, chống chạy trùng, tắt Agent).
-- Mục 2.7.4: quy trình đổi prompt: tăng `PROMPT_VERSION` → chạy eval trên tập dev → so với bản trước → chạy tập test giữ kín → ghi CHANGELOG; muốn rollback thì đổi lại version.
+- Mục 2.7.1: danh sách sự kiện log lấy từ `ai_runs`, `tool_calls`, `ai_evidence`, `audit_log` (DATA-MODEL, DEC-28); chỉ số giám sát và ngưỡng cảnh báo lấy từ BR-23.
+- Mục 2.7.2: bảng chỉ số 8.3 và kết quả thật từ `docs/eval/report-*.md`; chỉ số vận hành theo BR-26, BR-27.
+- Mục 2.7.3: ngân sách và giới hạn theo BR-16, BR-24; chi phí và độ trễ đo được; chống chạy trùng, tắt Agent.
+- Mục 2.7.4: quy trình theo DEC-27 và BR-25: tạo phiên bản DRAFT trong `agent_configs` → chạy eval trên tập dev → so với phiên bản đang chạy → chạy tập test giữ kín → QLKD duyệt nếu đổi tiêu chí → kích hoạt → theo dõi 1 tuần; rollback bằng cách kích hoạt lại phiên bản cũ.
 - Mục 3.2: giới hạn gồm dữ liệu giả lập, adapter mock, nhãn do nhóm tự gán, chưa thử tải.
 
 ---
