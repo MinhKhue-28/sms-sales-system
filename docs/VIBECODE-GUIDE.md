@@ -8,6 +8,7 @@ Bản 1.0, ngày 17/10/2026. Nguồn: tab "Bài làm chính" (Google Doc OULINE 
 > Nhóm đã chốt 100 FR + 15 NFR. Thứ tự đọc bây giờ là `AGENTS.md` → `docs/COLLABORATION.md` → `docs/WORKPLAN.md` → `docs/requirements/*`.
 >
 > **Còn dùng được:**
+> - **Nhà cung cấp mô hình đã chốt là OpenAI (DEC-12, 23/10/2026).** Các chi tiết riêng của Claude trong mục 6 và 8 (tên model, tham số `effort`, Tool Runner, `web_search_20260209`, đơn giá Opus, judge `claude-opus-5-5`) không còn áp dụng; WP-08 thay bằng tương đương của OpenAI theo tài liệu hiện hành. Chỉ số và ngưỡng ở mục 8.3 giữ nguyên.
 > - Mục 6 (đặc tả kỹ thuật 2 Agent, prompt, schema đầu ra). Tên bảng, cột trong mục này lệch `docs/requirements/DATA-MODEL.md` thì theo DATA-MODEL (cập nhật 22/10/2026: `agent_configs`, `tool_calls`, `ai_evidence`, `quote_versions`…).
 > - Mục 8 (khung đánh giá Agent).
 > - Mục 9 (kịch bản demo), nhưng bỏ bước của Pháp chế và Delivery.

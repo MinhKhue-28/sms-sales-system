@@ -5,7 +5,7 @@ description: Đặc tả và guardrails cho 2 AI Agent trong SMS — Sales Quali
 
 # SMS — AI Agents
 
-Đọc skill `sms-domain` trước. Yêu cầu chuẩn của Agent trong `docs/requirements/REQUIREMENTS.md` (mã bản 22/10): FR-06, FR-19, FR-20, FR-32 (Qualification Agent, nằm trong bảng khách hàng và cơ hội), FR-36, FR-44 (Opportunity Agent), FR-88 → FR-95 (quản lý tác nhân AI). Tham số trong `BUSINESS-RULES.md` (BR-01, BR-04, BR-08, BR-15, BR-16); phân quyền cấu hình theo DEC-11, DEC-24; bảng `agent_configs`, `tools`, `tool_grants`, `tool_calls`, `ai_evidence`, `ai_feedback` theo `DATA-MODEL.md`. Gọi model qua skill `claude-api` (model mặc định mới nhất, tool use). Hai Agent là **thành phần bên trong SMS**; nhà cung cấp mô hình nằm sau interface `LlmProvider` (DEC-12: bản cài sẵn là Claude, sơ đồ System Context của bài ghi OpenAI — giữ adapter để đổi được).
+Đọc skill `sms-domain` trước. Yêu cầu chuẩn của Agent trong `docs/requirements/REQUIREMENTS.md` (mã bản 22/10): FR-06, FR-19, FR-20, FR-32 (Qualification Agent, nằm trong bảng khách hàng và cơ hội), FR-36, FR-44 (Opportunity Agent), FR-88 → FR-95 (quản lý tác nhân AI). Tham số trong `BUSINESS-RULES.md` (BR-01, BR-04, BR-08, BR-15, BR-16); phân quyền cấu hình theo DEC-11, DEC-24; bảng `agent_configs`, `tools`, `tool_grants`, `tool_calls`, `ai_evidence`, `ai_feedback` theo `DATA-MODEL.md`. Hai Agent là **thành phần bên trong SMS**; nhà cung cấp mô hình nằm sau interface `LlmProvider`. **DEC-12 đã chốt OpenAI API** (khớp sơ đồ System Context): adapter mặc định là OpenAI, adapter Claude cũ giữ làm phụ. Kiểm tra tài liệu OpenAI hiện hành trước khi viết adapter (tool calling, structured output, web search), không viết theo trí nhớ.
 
 ## Nguyên tắc chung (áp dụng cho cả hai)
 

@@ -22,7 +22,7 @@ Mã FR theo bản đọc ngày 22/10/2026 (xem bảng đổi mã cuối `REQUIRE
 | DEC-09 | Kiểm tra hoá đơn nháp có cần người độc lập không | Mặc định | Không bắt buộc; người kiểm tra ghi trong lịch sử. Bật được bằng setting `invoice_independent_review=false`. | FR-66 |
 | DEC-10 | Bộ phận triển khai có dùng SMS trực tiếp không | **Chốt** theo FR | **Không.** NVKD ghi nhận tiến độ, kết quả bàn giao theo thông tin bộ phận triển khai cung cấp. SMS không cấp tài khoản hay license. | FR-61, FR-62 (nguồn đã đổi thành NVKD), FR-63; ERD HANDOVER |
 | DEC-11 | "Người quản lý tác nhân AI" là ai | Mặc định | Vai trò **AI_MANAGER**, quyền riêng (FR-98): cấu hình kỹ thuật và giám sát Agent; không quản trị tài khoản, không mở rộng quyền dữ liệu của Agent, không duyệt nghiệp vụ bán hàng. Tài khoản demo do ADMIN cấp. Chia việc với QLKD theo DEC-24. | FR-92 → FR-95, FR-98. Vai trò chưa có trong bảng 1.4.2: nhóm cần bổ sung. |
-| DEC-12 | Nhà cung cấp mô hình AI | Mặc định | Gọi LLM qua interface `LlmProvider`. Bản cài sẵn: **Claude** (`claude-opus-5-5`, SDK `@anthropic-ai/sdk`). Biến `LLM_PROVIDER=claude`. Không có API key thì chạy `mock`. **Đề xuất cho bài:** ghi khối E05 trên sơ đồ ngữ cảnh là "Dịch vụ mô hình ngôn ngữ (LLM API)" thay vì tên một hãng. Nếu nhóm giữ "OpenAI API", WP-08 thêm adapter OpenAI và đổi mặc định. | Sơ đồ System Context ghi "OpenAI API"; code dùng Claude. |
+| DEC-12 | Nhà cung cấp mô hình AI | **Chốt** | **OpenAI API**, cả trong bài và trong demo. Gọi LLM qua interface `LlmProvider`; WP-08 viết adapter OpenAI và đặt mặc định `LLM_PROVIDER=openai` (`OPENAI_API_KEY`). Model do nhóm chọn, ghi trong `agent_configs.model_reference`, dùng bản có ngày cố định (snapshot) để kết quả eval lặp lại được. Code Claude đang có giữ làm adapter phụ. Không có API key thì chạy `mock`. | Nhóm chốt 23/10/2026; sơ đồ System Context khối E05 "OpenAI API" |
 | DEC-13 | Ký điện tử, cổng thanh toán | **Chốt** | Chỉ làm adapter giả lập (mock) và luồng trạng thái. Không tích hợp nhà cung cấp thật. | FR-55 (Nên có), FR-70 (Tùy chọn) |
 | DEC-14 | Đăng nhập | Mặc định | Email + mật khẩu (băm scrypt), đặt lại mật khẩu do ADMIN tạo mã tạm. Không làm SSO. | FR-97; NFR-05 SSO là hướng mở rộng |
 | DEC-15 | Cơ sở dữ liệu | **Chốt** cho prototype | SQLite qua `node:sqlite`, file `data/sms.db` (hoặc `SMS_DB_PATH`). Deploy cần ổ đĩa lưu bền (volume). Không chuyển ORM. | Code hiện có; `docs/DEPLOY.md` |
@@ -43,7 +43,6 @@ Mã FR theo bản đọc ngày 22/10/2026 (xem bảng đổi mã cuối `REQUIRE
 - Mục 2.2.3 và tab *System Context Diagram* còn mô tả Customer Portal (DEC-01).
 - Bảng 1.4.2 thiếu "Quản lý tư vấn giải pháp" và "Người quản lý tác nhân AI"; dòng "Người quản trị hệ thống" chưa có mô tả (DEC-11, DEC-26).
 - Thống nhất một tên cho vai trò tư vấn (DEC-17).
-- Khối E05 "OpenAI API" trên sơ đồ ngữ cảnh (DEC-12).
 - Nguồn FR-91 (DEC-24); mô tả FR-33 còn "cần chốt" trong khi cột nguồn đã bỏ (DEC-03).
 - Tên FR-22 "Xóa Ngừng kinh doanh…" và FR-24 "Thêm Quản lý danh mục…" có chữ sót.
 - Mục 2.6.4 còn trống: duyệt bảng `BUSINESS-RULES.md` rồi chép vào.

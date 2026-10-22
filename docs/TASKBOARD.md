@@ -28,7 +28,7 @@ Trạng thái:
 
 Xem `docs/requirements/DECISIONS.md`, mục *Việc nhóm cần sửa trong bài*. Các mục **Mặc định** quan trọng nhất:
 
-- **DEC-12:** nhà cung cấp mô hình AI (sơ đồ ghi OpenAI, code dùng Claude).
+- **DEC-12 (đã chốt OpenAI):** WP-08 phải viết adapter OpenAI; code hiện chỉ có adapter Claude.
 - **DEC-11, DEC-24, DEC-26:** vai trò "Người quản lý tác nhân AI", "Quản lý tư vấn giải pháp" và ai cấu hình Agent.
 - **DEC-21, DEC-23:** người liên hệ nhiều doanh nghiệp; báo giá – đơn 1:1, thanh toán từng phần.
 - **DEC-08:** ai phát hành hoá đơn.

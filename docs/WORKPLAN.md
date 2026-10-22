@@ -195,6 +195,7 @@ Bài đã chuyển 6 FR có Agent vào bảng nghiệp vụ (khách hàng, cơ h
   - Quyền của Agent nằm ở tool registry, không chỉ ở prompt.
   - Dữ liệu bên ngoài phải bọc `untrusted_data`.
   - Có chế độ `mock` cho test và demo.
+  - Adapter **OpenAI** là mặc định (DEC-12); chuyển code Claude hiện có trong `src/lib/agents/runtime.ts` về sau interface `LlmProvider`.
   - Thiết kế chi tiết: `docs/VIBECODE-GUIDE.md` mục 6, đánh giá ở mục 8.
 - **Phụ thuộc:** WP-01, WP-03 (sự kiện, hàm), WP-07 (`createWorkItem`).
 

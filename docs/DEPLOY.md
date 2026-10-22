@@ -46,8 +46,9 @@ Dữ liệu nằm trong file SQLite (DEC-15). Vercel chạy serverless, không c
    | `SESSION_SECRET` | chuỗi ngẫu nhiên dài |
    | `INTEGRATION_API_KEY` | chuỗi ngẫu nhiên |
    | `SMS_DB_PATH` | `/data/sms.db` |
-   | `SMS_AI_MODE` | `mock` (đổi sang `claude` khi muốn demo Agent thật) |
-   | `ANTHROPIC_API_KEY` | chỉ thêm khi dùng `claude` |
+   | `SMS_AI_MODE` | `mock`; xoá biến này khi muốn demo Agent thật |
+   | `LLM_PROVIDER` | `openai` (DEC-12) |
+   | `OPENAI_API_KEY` | chỉ thêm khi demo Agent thật |
 
 3. Vào service → **Volumes → Add Volume**, gắn vào đường dẫn `/data`. Bỏ qua bước này thì dữ liệu mất sau mỗi lần deploy.
 4. **Settings → Networking → Generate Domain** để có link test.
