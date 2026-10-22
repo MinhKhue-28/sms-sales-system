@@ -14,12 +14,15 @@ jobs:
       SMS_AI_MODE: mock
       SESSION_SECRET: ci-only-secret
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
       - run: npm ci
+      # Next 16 sinh kiểu PageProps/LayoutProps vào .next/types; tsc cần chúng
+      - name: Generate route types
+        run: npx next typegen
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Lint

@@ -25,6 +25,7 @@ Mở http://localhost:3000. Lần chạy đầu hệ thống tự tạo dữ li�
 | [docs/requirements/BUSINESS-RULES.md](docs/requirements/BUSINESS-RULES.md) | Quy tắc nghiệp vụ và con số mặc định |
 | [docs/requirements/DECISIONS.md](docs/requirements/DECISIONS.md) | Quyết định thiết kế đã chốt và mặc định |
 | [docs/requirements/ROLES.md](docs/requirements/ROLES.md) | Vai trò, quyền, phạm vi dữ liệu |
+| [docs/requirements/DATA-MODEL.md](docs/requirements/DATA-MODEL.md) | Thực thể ERD của bài ↔ bảng trong code |
 | [docs/WORKPLAN.md](docs/WORKPLAN.md) | 12 gói việc và file thuộc từng gói |
 | [docs/COLLABORATION.md](docs/COLLABORATION.md) | Quy trình nhiều AI làm song song |
 | [docs/TASKBOARD.md](docs/TASKBOARD.md) | Bảng trạng thái các gói việc |

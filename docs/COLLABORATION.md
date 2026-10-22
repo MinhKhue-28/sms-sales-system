@@ -16,13 +16,13 @@
 
 - **Chỉ sửa file thuộc WP mình** (cột "Sở hữu" trong WORKPLAN).
 - **Cần thay đổi ở phần của WP khác:** không tự sửa. Ghi vào `docs/handoff/REQUESTS.md` theo mẫu:
-  `- [ ] [WP-03 → WP-02][19/10] Cần hàm priceFor() trả thêm thuế suất. Lý do: FR-33.`
+  `- [ ] [WP-03 → WP-02][19/10] Cần hàm priceFor() trả thêm thuế suất. Lý do: FR-38.`
 - **Thay đổi dữ liệu:** chỉ qua file migration `src/lib/db/migrations/wpXX_NNN_<ten>.ts`. Không sửa migration đã gộp vào `main`; muốn đổi thì viết migration mới.
 - **Gặp chỗ bài làm không nói rõ:**
   1. Tra `docs/requirements/BUSINESS-RULES.md`, rồi `DECISIONS.md`.
   2. Không có thì ghi vào mục *Câu hỏi mở* của `DECISIONS.md` và chọn phương án an toàn: có người duyệt, không tự động.
-- **Commit nhỏ**, thông điệp bắt đầu bằng WP và FR: `WP-03 FR-38: rủi ro có trạng thái Bỏ qua kèm lý do`.
-- **Test** đặt tên bắt đầu bằng mã FR hoặc mã cổng: `FR-29: …`, `HG3: …`.
+- **Commit nhỏ**, thông điệp bắt đầu bằng WP và FR: `WP-03 FR-43: rủi ro có trạng thái Bỏ qua kèm lý do`.
+- **Test** đặt tên bắt đầu bằng mã FR hoặc mã cổng: `FR-33: …`, `HG3: …`. Dùng mã FR bản 22/10 (bảng đổi mã cuối `REQUIREMENTS.md`).
 - **Không đưa API key vào code**, log hay commit. Key chỉ nằm trong `.env.local` hoặc biến môi trường của nơi deploy.
 
 ## 3. Kết thúc một phiên (bắt buộc, kể cả khi chưa xong)
@@ -36,7 +36,7 @@
 ## 4. Luân phiên giữa các AI
 
 - **Một WP chỉ do một AI làm tại một thời điểm.** File handoff là "gậy tiếp sức": AI sau đọc mục "Việc tiếp theo" của AI trước.
-- **Chia một WP lớn cho nhiều AI:** người điều phối tách thành WP con trong TASKBOARD, ví dụ `WP-03a` (Qualify, FR-27 → FR-30) và `WP-03b` (Develop, FR-31 → FR-41). Mỗi WP con phải được ghi rõ file sở hữu riêng.
+- **Chia một WP lớn cho nhiều AI:** người điều phối tách thành WP con trong TASKBOARD, ví dụ `WP-03a` (Đánh giá khách hàng: FR-30, FR-31, FR-33, FR-34) và `WP-03b` (Phát triển cơ hội: FR-35, FR-37 → FR-43, FR-45 → FR-47). Mỗi WP con phải được ghi rõ file sở hữu riêng.
 - **Gợi ý phân việc theo thế mạnh:**
   - AI mạnh về suy luận làm WP-00, WP-03, WP-08 (nhiều quy tắc, nhiều cổng).
   - AI nhanh làm WP-02, WP-07, WP-09 (CRUD nhiều).

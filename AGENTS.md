@@ -7,27 +7,45 @@ Dự án: **SMS – Sales Management System** cho doanh nghiệp B2B SaaS có d�
 1. `docs/COLLABORATION.md`: quy trình bắt đầu và kết thúc phiên, nhánh git, bàn giao, những điều cấm.
 2. `docs/TASKBOARD.md`: chọn **một** gói việc (WP) đang "Sẵn sàng" hoặc đã giao cho bạn.
 3. `docs/WORKPLAN.md`: phạm vi, **file bạn được sửa**, hợp đồng với WP khác, định nghĩa "xong".
-4. `docs/requirements/REQUIREMENTS.md`: 100 FR + 15 NFR. Đây là đặc tả phải cài đúng; mỗi FR ghi WP, cổng kiểm soát, quy tắc BR liên quan.
+4. `docs/requirements/REQUIREMENTS.md`: 100 FR + 15 NFR, **mã FR theo bản đọc 22/10/2026** (bảng đổi mã ở cuối file). Đây là đặc tả phải cài đúng; mỗi FR ghi module, WP, cổng kiểm soát, quy tắc BR liên quan.
 5. `docs/requirements/BUSINESS-RULES.md`: con số cụ thể cho mọi chỗ FR ghi "theo quy tắc / cấu hình".
 6. `docs/requirements/DECISIONS.md`: các quyết định đã chốt và mặc định. **Không tự đặt quyết định mới.**
 7. `docs/requirements/ROLES.md`: vai trò, quyền, phạm vi dữ liệu.
-8. `docs/handoff/WP-xx.md` của WP bạn nhận: làm tiếp từ mục "Việc tiếp theo".
-9. Khi làm WP-08 (AI Agent) hoặc WP-11 (kiểm thử): đọc thêm `docs/VIBECODE-GUIDE.md` mục 6 (đặc tả Agent) và mục 8 (đánh giá).
+8. `docs/requirements/DATA-MODEL.md`: thực thể ERD của bài ↔ bảng trong code, WP nào tạo bảng nào.
+9. `docs/handoff/WP-xx.md` của WP bạn nhận: làm tiếp từ mục "Việc tiếp theo".
+10. Khi làm WP-08 (AI Agent) hoặc WP-11 (kiểm thử): đọc thêm `docs/VIBECODE-GUIDE.md` mục 6 (đặc tả Agent) và mục 8 (đánh giá).
 
 ## Stack (đã chốt, không đổi)
 
 - **Ứng dụng:** Next.js 16 App Router, React 19, TypeScript, Tailwind 4.
 - **Dữ liệu:** SQLite qua `node:sqlite` (truy cập qua `src/lib/db`). Không dùng Prisma/ORM.
-- **Phân tầng:** UI → server action → `src/lib/services/*` (kiểm quyền, quy tắc, audit) → `src/lib/db`.
+- **Phân tầng:** kiến trúc 3 lớp, xem mục dưới (DEC-25, NFR-12).
 - **Ngoài hệ thống:**
   - Hệ thống ngoài đi qua adapter `src/lib/integrations/*`, luôn có bản giả lập (mock).
   - Mô hình AI đi qua `LlmProvider` (DEC-12). Không có API key thì `SMS_AI_MODE=mock`.
 - **Lệnh:**
   - `npm run dev`
-  - `npx tsc --noEmit`
+  - `npx next typegen` rồi `npx tsc --noEmit` (Next 16 sinh kiểu `PageProps`, `LayoutProps` khi typegen; bỏ bước này `tsc` báo lỗi)
   - `npx eslint .`
   - `npx next build`
   - Sau WP-00 có thêm: `npm run check`, `npm test`, `npm run test:e2e`, `npm run db:reset`, `npm run fr:coverage`.
+
+## Kiến trúc 3 lớp
+
+Bài chọn kiến trúc 3 lớp (NFR-12, tab *3-Layer Architecture*). Code đặt đúng lớp như sau; mỗi lớp chỉ gọi lớp ngay dưới nó.
+
+| Lớp trong bài | Thành phần trong bài | Thư mục trong code |
+|---|---|---|
+| Presentation (GUI) | UI Components | `src/app/**/page.tsx`, `src/components/**` |
+| | UI Process Components | `src/app/**/layout.tsx`, điều hướng `src/lib/nav.ts` (WP-00 tạo) |
+| Business Logic (BLL) | Service Interface (Application Facade) | Server action `src/app/**/actions.ts` (bọc bởi `src/lib/action.ts`), Route Handler `src/app/api/**`: nhận yêu cầu, kiểm dữ liệu vào bằng zod, gọi service |
+| | Business Workflows | Hàm nhiều bước trong `src/lib/services/*` (chuyển đổi Lead, chuyển giai đoạn, tạo đơn từ báo giá); runtime Agent `src/lib/agents/**` |
+| | Business Components | `src/lib/services/*`: kiểm quyền (`src/lib/rbac.ts`, `src/lib/scope.ts`), quy tắc BR, ghi `audit_log` |
+| | Business Entities (DTO) | Kiểu và enum dùng chung `src/lib/domain.ts`; kiểu riêng của module trong `src/lib/<module>/` |
+| Data Access (DAL) | Data Access Logic Components | `src/lib/db/**` (`all`, `get`, `run`, `tx`), migration |
+| | Service Agents | `src/lib/integrations/**` (email, kế toán, bản đồ, ký điện tử, cổng thanh toán…), `src/lib/llm/**` |
+
+Cấm: trang hoặc component gọi thẳng `src/lib/db`; service gọi thẳng SDK bên ngoài mà không qua Service Agent.
 
 ## Luật cứng
 
@@ -35,7 +53,9 @@ Dự án: **SMS – Sales Management System** cho doanh nghiệp B2B SaaS có d�
 - **Đổi dữ liệu chỉ bằng migration mới** `src/lib/db/migrations/wpXX_NNN_<ten>.ts`.
 - **Mọi thao tác ghi kiểm quyền ở server**, mọi đổi trạng thái ghi `audit_log`.
 - **Agent chỉ đề xuất.** Agent không gửi email, không đổi trạng thái, không gộp hồ sơ, không sửa doanh thu/ngày chốt/giai đoạn/bảng giá, không tick mục kiểm soát. Quyền chặn ở tool registry, không chỉ ở prompt.
-- **10 cổng kiểm soát** (HG1–HG8, duyệt hợp nhất, duyệt chuyên môn) mỗi cổng có test riêng.
+- **10 cổng kiểm soát** (HG1–HG8, duyệt hợp nhất, duyệt chuyên môn) mỗi cổng có test riêng. Duyệt chuyên môn (FR-42) là "Nên có": bật/tắt bằng `expert_review_enabled`, test cả hai trường hợp.
+- **Dữ liệu theo ERD của bài** (`DATA-MODEL.md`): bảng mới đặt đúng tên ghi ở đó, không tự đặt bảng khác cho cùng thực thể.
+- **Nhãn UI theo tên trong bài:** vai trò (`ROLES.md`), quy trình và giai đoạn (DEC-19).
 - **Test** đặt tên bắt đầu bằng mã FR/HG. Commit bắt đầu bằng `WP-xx FR-yy:`.
 - **UI tiếng Việt.** Không hard-code giá trị BR, đọc từ `settings`.
 - **Không làm:** Customer Portal, Agent thứ ba, huỷ đơn hàng, đổi DB/ORM, tích hợp thật với ký điện tử hoặc cổng thanh toán (chỉ làm bản giả lập).

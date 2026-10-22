@@ -8,7 +8,7 @@ Bản 1.0, ngày 17/10/2026. Nguồn: tab "Bài làm chính" (Google Doc OULINE 
 > Nhóm đã chốt 100 FR + 15 NFR. Thứ tự đọc bây giờ là `AGENTS.md` → `docs/COLLABORATION.md` → `docs/WORKPLAN.md` → `docs/requirements/*`.
 >
 > **Còn dùng được:**
-> - Mục 6 (đặc tả kỹ thuật 2 Agent, prompt, schema đầu ra).
+> - Mục 6 (đặc tả kỹ thuật 2 Agent, prompt, schema đầu ra). Tên bảng, cột trong mục này lệch `docs/requirements/DATA-MODEL.md` thì theo DATA-MODEL (cập nhật 22/10/2026: `agent_configs`, `tool_calls`, `ai_evidence`, `quote_versions`…).
 > - Mục 8 (khung đánh giá Agent).
 > - Mục 9 (kịch bản demo), nhưng bỏ bước của Pháp chế và Delivery.
 >
