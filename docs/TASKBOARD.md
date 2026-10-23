@@ -18,11 +18,11 @@ Trạng thái:
 | WP-09 | Quản trị hệ thống | FR-96 → FR-100 | 1 | WP-00, WP-07 (`teams`) | Chờ | | | |
 | WP-10 | Tích hợp, dữ liệu mẫu, triển khai | — | 1 | WP-00 | Chờ | | | |
 | WP-03 | Đánh giá khách hàng và Phát triển cơ hội | FR-30, FR-31, FR-33 → FR-35, FR-37 → FR-43, FR-45 → FR-47 | 2 | WP-01, WP-02 | Chờ | | | Có thể tách 03a (FR-30, FR-31, FR-33, FR-34) / 03b (phần còn lại) |
-| WP-08 | AI Agent | FR-06, FR-19, FR-20, FR-32, FR-36, FR-44, FR-88 → FR-95 | 2 | WP-01, WP-03, WP-07 | Chờ | | | Phần cấu hình và giám sát (FR-88 → FR-91) làm được từ đợt 1 |
+| WP-08 | AI Agent | FR-06, FR-19, FR-20, FR-32, FR-36, FR-44, FR-88 → FR-95 | 2 | WP-01, WP-03, WP-07 | Chờ | | | Phần cấu hình và giám sát (FR-88 → FR-91) làm được từ đợt 1. Sửa BUG-001 → BUG-010 |
 | WP-04 | Đề xuất giải pháp và báo giá | FR-48 → FR-55 | 3 | WP-02, WP-03 | Chờ | | | |
 | WP-05 | Đơn hàng | FR-56 → FR-63 | 4 | WP-04 | Chờ | | | |
 | WP-06 | Hoá đơn và thanh toán | FR-64 → FR-74 | 5 | WP-05, WP-10 | Chờ | | | |
-| WP-11 | Kiểm thử và đánh giá | 10 cổng, NFR | liên tục | WP-00 | Chờ | | | Bắt đầu ngay sau WP-00 |
+| WP-11 | Kiểm thử và đánh giá | 10 cổng, NFR | liên tục | WP-00 | Chờ | | | Bắt đầu ngay sau WP-00. Sửa BUG-011 → BUG-013 |
 
 ## Quyết định cần nhóm chốt (ảnh hưởng code)
 
