@@ -9,6 +9,7 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1 SMS_DB_PATH=:memory:
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+RUN mkdir -p /app/public
 RUN npm run build
 
 FROM node:24-slim AS run
