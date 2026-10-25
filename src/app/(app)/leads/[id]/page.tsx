@@ -6,14 +6,28 @@ import { BANT_KEYS, BANT_LABEL, DISQUALIFY_REASONS, formatDate, LEAD_SOURCE, LEA
 import { can } from "@/lib/rbac";
 import { listRuns, listSuggestions } from "@/lib/services/ai-review";
 import { activitiesFor, auditTrail, settingNumber, users } from "@/lib/services/core";
-import { conversionCandidates, findDuplicates, getLead } from "@/lib/services/leads";
+import { conversionCandidates, findDuplicates, getLead, listTags } from "@/lib/services/leads";
 import { SubmitButton } from "@/components/client";
 import { AgentRuns, AuditTrail, SALES_STAGES, SuggestionSummary, Timeline } from "@/components/record";
 import {
   Card, CommandAction, CommandBar, CommandLink, CommandSep, Flash, FormField, HeaderField, MessageBar, PageTitle, Persona, ProcessFlow, StatusBadge, Tabs, cx,
 } from "@/components/ui";
+import { RatingBadge } from "@/components/customers/rating-badge";
+import { QualificationPanel } from "@/components/qualify";
+import { get } from "@/lib/db";
 import {
-  addLeadActivityAction, bantAction, convertAction, disqualifyAction, reactivateAction, runQualificationAction, updateLeadAction,
+  addLeadActivityAction,
+  approveMergeAction,
+  bantAction,
+  convertAction,
+  disqualifyAction,
+  reactivateAction,
+  rejectMergeAction,
+  requestMergeAction,
+  restoreLeadAction,
+  runQualificationAction,
+  softDeleteLeadAction,
+  updateLeadAction,
 } from "../actions";
 
 export async function generateMetadata({ params }: PageProps<"/leads/[id]">): Promise<Metadata> {
@@ -29,15 +43,31 @@ export default async function LeadPage({ params, searchParams }: PageProps<"/lea
   if (!lead) notFound();
 
   const tab = sp.tab ?? "summary";
-  const open = lead.status === "OPEN" || lead.status === "WORKING";
+  const open = (lead.status === "OPEN" || lead.status === "WORKING") && !lead.deleted_at;
   const canWrite = can(user.role, "lead.write");
-  const threshold = settingNumber("bant_threshold");
+  const threshold = settingNumber("bant_threshold") || 60;
   const dups = findDuplicates(lead, lead.id);
+  const duplicateLeads = dups.filter((d) => d.kind === "LEAD");
   const suggestions = listSuggestions({ entityType: "lead", entityId: lead.id });
   const pending = suggestions.filter((s) => s.status === "PENDING_REVIEW");
+  const pendingMerge = get<{
+    id: number;
+    reason: string;
+    payload_json: string;
+    requested_by_name: string;
+    created_at: string;
+  }>(
+    `SELECT a.id, a.reason, a.payload_json, u.name as requested_by_name, a.created_at
+     FROM approvals a
+     LEFT JOIN users u ON u.id = a.requested_by
+     WHERE a.kind = 'MERGE' AND a.status = 'PENDING' AND a.entity_id = ?`,
+    lead.id,
+  );
   const owners = [...users("SALES"), ...users("SALES_MANAGER")];
   const cand = conversionCandidates(lead);
   const activities = activitiesFor("lead", lead.id);
+  const allTags = listTags();
+  const leadTagIds = new Set((lead.tags || []).map((t) => t.id));
   const base = `/leads/${lead.id}`;
 
   return (
@@ -59,17 +89,43 @@ export default async function LeadPage({ params, searchParams }: PageProps<"/lea
         {lead.status === "DISQUALIFIED" && canWrite && (
           <CommandAction action={reactivateAction} fields={{ id: lead.id }} icon="refresh">Tái kích hoạt</CommandAction>
         )}
+        {lead.deleted_at && canWrite && (
+          <CommandAction action={restoreLeadAction} fields={{ id: lead.id }} icon="refresh">Khôi phục Lead</CommandAction>
+        )}
+        {!lead.deleted_at && canWrite && (
+          <CommandAction action={softDeleteLeadAction} fields={{ id: lead.id }} icon="delete">Chuyển vào thùng rác</CommandAction>
+        )}
         {lead.converted_opportunity_id && (
           <CommandLink href={`/opportunities/${lead.converted_opportunity_id}`} icon="opportunity">Mở Opportunity</CommandLink>
         )}
       </CommandBar>
       <Flash sp={sp} />
+
+      {lead.deleted_at && (
+        <div className="mx-6 mt-3">
+          <MessageBar intent="warning">
+            Lead này đang nằm trong thùng rác (đã xóa mềm lúc {formatDate(lead.deleted_at, true)}). Hãy bấm &quot;Khôi phục Lead&quot; trên thanh lệnh để kích hoạt lại.
+          </MessageBar>
+        </div>
+      )}
+
+      {lead.merged_into_lead_id && (
+        <div className="mx-6 mt-3">
+          <MessageBar intent="info">
+            Lead này đã được hợp nhất vào <Link className="link font-bold" href={`/leads/${lead.merged_into_lead_id}`}>Lead #{lead.merged_into_lead_id}</Link>.
+          </MessageBar>
+        </div>
+      )}
+
       <PageTitle
         icon="lead"
         title={lead.company_name}
         subtitle={`Lead · ${lead.contact_name}${lead.contact_title ? ` – ${lead.contact_title}` : ""}`}
         right={
           <>
+            <HeaderField label="Phân loại">
+              <RatingBadge rating={lead.rating} />
+            </HeaderField>
             <HeaderField label="Điểm BANT">
               <span className={lead.bant_score >= threshold ? "text-success" : ""}>{lead.bant_score}</span>
               <span className="text-sm font-normal text-ink-3">/100</span>
@@ -83,15 +139,54 @@ export default async function LeadPage({ params, searchParams }: PageProps<"/lea
       <ProcessFlow stages={SALES_STAGES} current={lead.status === "CONVERTED" ? "DEVELOP" : "QUALIFY"} lost={lead.status === "DISQUALIFIED"} />
 
       <div className="space-y-2 px-6">
+        {pendingMerge && (
+          <MessageBar intent="info" title="Có yêu cầu hợp nhất đang chờ Quản lý kinh doanh duyệt (DEC-04):">
+            <div className="flex flex-col gap-2">
+              <div className="text-xs">
+                {pendingMerge.reason} (Người yêu cầu: {pendingMerge.requested_by_name || "Nhân viên kinh doanh"})
+              </div>
+              {can(user.role, "lead.merge.approve") && (
+                <div className="flex items-center gap-2 pt-1">
+                  <form action={approveMergeAction} className="inline-flex items-center gap-2">
+                    <input type="hidden" name="id" value={pendingMerge.id} />
+                    <input name="comment" placeholder="Ý kiến duyệt..." className="input !h-7 !py-0 text-xs" />
+                    <SubmitButton size="sm" variant="primary">Duyệt hợp nhất</SubmitButton>
+                  </form>
+                  <form action={rejectMergeAction} className="inline-flex items-center gap-2">
+                    <input type="hidden" name="id" value={pendingMerge.id} />
+                    <input name="comment" placeholder="Lý do từ chối..." required className="input !h-7 !py-0 text-xs" />
+                    <SubmitButton size="sm" variant="danger">Từ chối</SubmitButton>
+                  </form>
+                </div>
+              )}
+            </div>
+          </MessageBar>
+        )}
         {dups.length > 0 && (
-          <MessageBar intent="warning" title="Có thể trùng:">
-            {dups.map((d, i) => (
-              <span key={i}>
-                {i > 0 && "; "}
-                {d.kind === "LEAD" ? <Link className="link" href={`/leads/${d.id}`}>{d.label}</Link> : d.kind === "ACCOUNT" ? <Link className="link" href={`/accounts/${d.id}`}>{d.label}</Link> : d.label} ({d.reason})
-              </span>
-            ))}
-            . Hệ thống không tự gộp — hãy kiểm tra trước khi chuyển đổi.
+          <MessageBar intent="warning" title="Phát hiện trùng lặp (BR-21):">
+            <div>
+              {dups.map((d, i) => (
+                <span key={i}>
+                  {i > 0 && "; "}
+                  {d.kind === "LEAD" ? <Link className="link" href={`/leads/${d.id}`}>{d.label}</Link> : d.kind === "ACCOUNT" ? <Link className="link" href={`/accounts/${d.id}`}>{d.label}</Link> : d.label} ({d.reason})
+                </span>
+              ))}
+              . Hệ thống không tự gộp — hãy kiểm tra và đề nghị hợp nhất nếu cần.
+            </div>
+
+            {duplicateLeads.length > 0 && open && canWrite && (
+              <form action={requestMergeAction} className="mt-3 flex flex-wrap items-center gap-2 border-t border-amber-200 pt-2">
+                <input type="hidden" name="id" value={lead.id} />
+                <span className="text-xs font-semibold">Đề nghị hợp nhất vào Lead:</span>
+                <select name="target_id" className="select !h-7 !py-0 text-xs" required defaultValue={duplicateLeads[0].id}>
+                  {duplicateLeads.map((dl) => (
+                    <option key={dl.id} value={dl.id}>#{dl.id} - {dl.label}</option>
+                  ))}
+                </select>
+                <input name="reason" placeholder="Lý do hợp nhất..." className="input !h-7 !py-0 text-xs" defaultValue="Trùng lặp thông tin khách hàng" />
+                <SubmitButton size="sm" variant="primary">Gửi duyệt hợp nhất</SubmitButton>
+              </form>
+            )}
           </MessageBar>
         )}
         {pending.length > 0 && (
@@ -119,12 +214,27 @@ export default async function LeadPage({ params, searchParams }: PageProps<"/lea
               <form id="lead-form" action={updateLeadAction} className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <input type="hidden" name="id" value={lead.id} />
                 <fieldset disabled={!open || !canWrite} className="contents">
-                  <FormField label="Tên công ty" required><input name="company_name" defaultValue={lead.company_name} className="input" required /></FormField>
-                  <FormField label="Ngành"><input name="industry" defaultValue={lead.industry ?? ""} className="input" /></FormField>
-                  <FormField label="Người liên hệ" required><input name="contact_name" defaultValue={lead.contact_name} className="input" required /></FormField>
-                  <FormField label="Chức danh"><input name="contact_title" defaultValue={lead.contact_title ?? ""} className="input" /></FormField>
-                  <FormField label="Email"><input name="email" type="email" defaultValue={lead.email ?? ""} className="input" /></FormField>
-                  <FormField label="Điện thoại"><input name="phone" defaultValue={lead.phone ?? ""} className="input" /></FormField>
+                  <FormField label="Tên công ty" required>
+                    <input name="company_name" defaultValue={lead.company_name} className="input" required />
+                  </FormField>
+                  <FormField label="Ngành">
+                    <input name="industry" defaultValue={lead.industry ?? ""} className="input" />
+                  </FormField>
+                  <FormField label="Chủ đề / Nhu cầu" className="md:col-span-2">
+                    <input name="topic" defaultValue={lead.topic ?? ""} className="input" placeholder="Nhu cầu chính..." />
+                  </FormField>
+                  <FormField label="Người liên hệ" required>
+                    <input name="contact_name" defaultValue={lead.contact_name} className="input" required />
+                  </FormField>
+                  <FormField label="Chức danh">
+                    <input name="contact_title" defaultValue={lead.contact_title ?? ""} className="input" />
+                  </FormField>
+                  <FormField label="Email">
+                    <input name="email" type="email" defaultValue={lead.email ?? ""} className="input" />
+                  </FormField>
+                  <FormField label="Điện thoại">
+                    <input name="phone" defaultValue={lead.phone ?? ""} className="input" />
+                  </FormField>
                   <FormField label="Địa chỉ" className="md:col-span-2" hint={lead.address_normalized && lead.address_normalized !== lead.address ? `Chuẩn hóa: ${lead.address_normalized}` : undefined}>
                     <input name="address" defaultValue={lead.address ?? ""} className="input" />
                   </FormField>
@@ -133,8 +243,34 @@ export default async function LeadPage({ params, searchParams }: PageProps<"/lea
                       {owners.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                     </select>
                   </FormField>
-                  <FormField label="Tạo lúc"><input disabled value={formatDate(lead.created_at, true)} className="input" /></FormField>
-                  <FormField label="Ghi chú" className="md:col-span-2"><textarea name="notes" defaultValue={lead.notes ?? ""} className="textarea" /></FormField>
+                  <FormField label="Tạo lúc">
+                    <input disabled value={formatDate(lead.created_at, true)} className="input" />
+                  </FormField>
+
+                  {/* FR-07: Tags */}
+                  {allTags.length > 0 && (
+                    <FormField label="Nhãn (Tags)" className="md:col-span-2">
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {allTags.map((t) => (
+                          <label key={t.id} className="inline-flex items-center gap-1.5 rounded border border-stroke px-2 py-0.5 text-xs cursor-pointer">
+                            <input
+                              type="checkbox"
+                              name="tag_ids"
+                              value={t.id}
+                              defaultChecked={leadTagIds.has(t.id)}
+                              className="accent-[var(--brand)]"
+                            />
+                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: t.color }} />
+                            {t.name}
+                          </label>
+                        ))}
+                      </div>
+                    </FormField>
+                  )}
+
+                  <FormField label="Ghi chú" className="md:col-span-2">
+                    <textarea name="notes" defaultValue={lead.notes ?? ""} className="textarea" />
+                  </FormField>
                 </fieldset>
                 {open && canWrite && (
                   <div className="md:col-span-2">
@@ -145,6 +281,9 @@ export default async function LeadPage({ params, searchParams }: PageProps<"/lea
             </Card>
 
             <div className="space-y-4">
+              {/* Slot bàn giao cho WP-03 */}
+              <QualificationPanel leadId={lead.id} />
+
               <Card title={`BANT — ngưỡng đạt chuẩn ${threshold}/100`}>
                 <form action={bantAction} className="space-y-3">
                   <input type="hidden" name="id" value={lead.id} />

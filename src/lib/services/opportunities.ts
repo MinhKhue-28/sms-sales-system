@@ -1,8 +1,12 @@
-// Giai đoạn DEVELOP (và chuyển stage đến PROPOSE/CLOSE, LOST).
+// Giai đoạn DEVELOP (và chuyển stage đến PROPOSE/CLOSE, WON, LOST).
 import { all, get, run, tx } from "../db";
 import { assert, DEVELOP_CHECKLIST, type ChecklistKey } from "../domain";
+import { can } from "../rbac";
 import { requestApproval } from "./approvals";
 import { actorUserId, audit, notify, setting, type Actor } from "./core";
+import { listRisks, type OpportunityRisk } from "./risks";
+
+export * from "./risks";
 
 export type Opportunity = {
   id: number;
@@ -19,6 +23,7 @@ export type Opportunity = {
   lead_id: number | null;
   stage: "DEVELOP" | "PROPOSE" | "CLOSE" | "WON" | "LOST";
   amount: number;
+  budget: number;
   close_date: string | null;
   price_list_id: number | null;
   price_list_name: string | null;
@@ -30,9 +35,72 @@ export type Opportunity = {
   competitors_confirmed: number;
   importance: "LOW" | "MEDIUM" | "HIGH" | null;
   lost_reason: string | null;
+  lost_reason_code: string | null;
+  reopened_at: string | null;
+  reopened_by: number | null;
+  reopen_reason: string | null;
+  expert_review_status: "NONE" | "PENDING" | "APPROVED" | "REJECTED";
   created_at: string;
   updated_at: string;
   closed_at: string | null;
+};
+
+export type ScopeDocument = {
+  id: number;
+  opportunity_id: number;
+  title: string;
+  content: string | null;
+  deliverables: string | null;
+  status: "DRAFT" | "SENT" | "CONFIRMED";
+  created_by: number | null;
+  confirmed_by: number | null;
+  confirmed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  creator_name?: string | null;
+  confirmer_name?: string | null;
+};
+
+export type OpportunityItem = {
+  id: number;
+  opportunity_id: number;
+  product_id: number;
+  product_code: string;
+  product_name: string;
+  product_unit: string;
+  quantity: number;
+  unit_price: number;
+  discount_pct: number;
+  amount: number;
+  notes: string | null;
+  created_at: string;
+};
+
+export type SolutionRecord = {
+  id: number;
+  opportunity_id: number;
+  title: string;
+  technical_approach: string | null;
+  architecture: string | null;
+  estimated_effort_mandays: number;
+  integration_required: number;
+  risks: string | null;
+  status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED";
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+  creator_name?: string | null;
+};
+
+export type StageHistoryRecord = {
+  id: number;
+  opportunity_id: number;
+  from_stage: string;
+  to_stage: string;
+  moved_by: number | null;
+  moved_by_name?: string | null;
+  reason: string | null;
+  moved_at: string;
 };
 
 const SELECT = `SELECT o.*, a.name AS account_name, c.full_name AS contact_name, u.name AS owner_name,
@@ -67,11 +135,408 @@ export function getOpportunity(id: number) {
 
 function mustOpen(id: number) {
   const o = getOpportunity(id);
-  assert(o, "Không tìm thấy Opportunity");
-  assert(o.stage !== "WON" && o.stage !== "LOST", "Opportunity đã đóng");
+  assert(o, "Không tìm thấy Cơ hội");
+  assert(o.stage !== "WON" && o.stage !== "LOST", "Cơ hội đã đóng (WON hoặc LOST)");
   return o;
 }
 
+// ===== Quản lý thông tin chung cơ hội (FR-35) =====
+export function updateOpportunity(
+  actor: Actor,
+  id: number,
+  input: {
+    name?: string;
+    amount?: number;
+    budget?: number;
+    close_date?: string | null;
+    customer_need?: string | null;
+    price_list_id?: number | null;
+    primary_contact_id?: number | null;
+    presales_id?: number | null;
+    importance?: "LOW" | "MEDIUM" | "HIGH" | null;
+  },
+) {
+  assert(actor.type === "USER", "Chỉ nhân viên được cập nhật hồ sơ Cơ hội");
+  const o = mustOpen(id);
+  const keys = Object.keys(input).filter((k) => input[k as keyof typeof input] !== undefined) as (keyof typeof input)[];
+  if (!keys.length) return;
+  if (input.amount !== undefined) assert(input.amount >= 0, "Giá trị dự kiến không hợp lệ");
+  if (input.budget !== undefined) assert(input.budget >= 0, "Ngân sách không hợp lệ");
+  if (input.price_list_id !== undefined && input.price_list_id !== o.price_list_id) {
+    assert(o.stage === "DEVELOP", "Chỉ đổi bảng giá ở giai đoạn Phát triển cơ hội (DEVELOP)");
+  }
+  tx(() => {
+    run(
+      `UPDATE opportunities SET ${keys.map((k) => `${k} = ?`).join(", ")}, updated_at = datetime('now') WHERE id = ?`,
+      ...keys.map((k) => (input[k] ?? null) as string | number | null),
+      id,
+    );
+    // Nhu cầu thay đổi thì phải xác nhận lại.
+    if (input.customer_need !== undefined && input.customer_need !== o.customer_need) {
+      run("UPDATE opportunities SET need_confirmed = 0 WHERE id = ?", id);
+    }
+    audit(actor, "opportunity", id, "UPDATE", { details: input });
+  });
+}
+
+// ===== Biên bản phạm vi & Nhu cầu chi tiết (FR-37) =====
+export function getScopeDocument(opportunityId: number): ScopeDocument | undefined {
+  return get<ScopeDocument>(
+    `SELECT s.*, u1.name AS creator_name, u2.name AS confirmer_name
+     FROM scope_documents s
+     LEFT JOIN users u1 ON u1.id = s.created_by
+     LEFT JOIN users u2 ON u2.id = s.confirmed_by
+     WHERE s.opportunity_id = ?
+     ORDER BY s.id DESC LIMIT 1`,
+    opportunityId,
+  );
+}
+
+export function createScopeDocument(
+  actor: Actor,
+  opportunityId: number,
+  input: { title: string; content?: string; deliverables?: string },
+): { id: number } {
+  mustOpen(opportunityId);
+  assert(input.title?.trim(), "Tiêu đề biên bản phạm vi không được để trống");
+  const { id } = run(
+    `INSERT INTO scope_documents (opportunity_id, title, content, deliverables, status, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'DRAFT', ?, datetime('now'), datetime('now'))`,
+    opportunityId,
+    input.title.trim(),
+    input.content?.trim() ?? null,
+    input.deliverables?.trim() ?? null,
+    actorUserId(actor),
+  );
+  audit(actor, "opportunity", opportunityId, "SCOPE_DOC_CREATE", { details: input });
+  return { id };
+}
+
+export function updateScopeDocument(
+  actor: Actor,
+  docId: number,
+  input: { title?: string; content?: string; deliverables?: string; status?: "DRAFT" | "SENT" | "CONFIRMED" },
+) {
+  const doc = get<ScopeDocument>("SELECT * FROM scope_documents WHERE id = ?", docId);
+  assert(doc, "Không tìm thấy biên bản phạm vi");
+  mustOpen(doc.opportunity_id);
+
+  const keys = Object.keys(input).filter((k) => input[k as keyof typeof input] !== undefined) as (keyof typeof input)[];
+  if (!keys.length) return;
+
+  tx(() => {
+    run(
+      `UPDATE scope_documents SET ${keys.map((k) => `${k} = ?`).join(", ")}, updated_at = datetime('now') WHERE id = ?`,
+      ...keys.map((k) => (input[k] ?? null) as string | number | null),
+      docId,
+    );
+    if (input.status === "CONFIRMED") {
+      run("UPDATE scope_documents SET confirmed_by = ?, confirmed_at = datetime('now') WHERE id = ?", actorUserId(actor), docId);
+      run("UPDATE opportunities SET need_confirmed = 1, updated_at = datetime('now') WHERE id = ?", doc.opportunity_id);
+    }
+    audit(actor, "opportunity", doc.opportunity_id, "SCOPE_DOC_UPDATE", { details: input });
+  });
+}
+
+export function confirmScopeDocument(actor: Actor, docId: number) {
+  updateScopeDocument(actor, docId, { status: "CONFIRMED" });
+}
+
+// ===== Cấu hình sản phẩm, dịch vụ & Gói giải pháp (FR-38) =====
+export function listOpportunityItems(opportunityId: number): OpportunityItem[] {
+  return all<OpportunityItem>(
+    `SELECT oi.*, p.code AS product_code, p.name AS product_name, p.unit AS product_unit
+     FROM opportunity_items oi
+     JOIN products p ON p.id = oi.product_id
+     WHERE oi.opportunity_id = ?
+     ORDER BY oi.id`,
+    opportunityId,
+  );
+}
+
+export function recalculateOpportunityRevenue(opportunityId: number): number {
+  const row = get<{ total: number }>(
+    "SELECT COALESCE(SUM(amount), 0) AS total FROM opportunity_items WHERE opportunity_id = ?",
+    opportunityId,
+  );
+  const total = row?.total ?? 0;
+  run("UPDATE opportunities SET amount = ?, updated_at = datetime('now') WHERE id = ?", total, opportunityId);
+  return total;
+}
+
+export function addOpportunityItem(
+  actor: Actor,
+  opportunityId: number,
+  input: { product_id: number; quantity: number; unit_price?: number; discount_pct?: number; notes?: string },
+) {
+  assert(actor.type === "USER", "Chỉ nhân viên được cấu hình sản phẩm cho cơ hội");
+  const o = mustOpen(opportunityId);
+  assert(input.quantity > 0, "Số lượng sản phẩm phải lớn hơn 0");
+
+  let unitPrice = input.unit_price;
+  if (unitPrice === undefined) {
+    // Lấy đơn giá từ bảng giá đang chọn của cơ hội
+    if (o.price_list_id) {
+      const pli = get<{ unit_price: number }>(
+        "SELECT unit_price FROM price_list_items WHERE price_list_id = ? AND product_id = ?",
+        o.price_list_id,
+        input.product_id,
+      );
+      unitPrice = pli?.unit_price ?? 0;
+    } else {
+      unitPrice = 0;
+    }
+  }
+
+  const discountPct = Math.max(0, Math.min(100, input.discount_pct ?? 0));
+  const amount = Math.round(input.quantity * unitPrice * (1 - discountPct / 100));
+
+  tx(() => {
+    run(
+      `INSERT INTO opportunity_items (opportunity_id, product_id, quantity, unit_price, discount_pct, amount, notes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      opportunityId,
+      input.product_id,
+      input.quantity,
+      unitPrice,
+      discountPct,
+      amount,
+      input.notes?.trim() ?? null,
+    );
+    recalculateOpportunityRevenue(opportunityId);
+    audit(actor, "opportunity", opportunityId, "ITEM_ADD", { details: { ...input, amount } });
+  });
+}
+
+export function updateOpportunityItem(
+  actor: Actor,
+  itemId: number,
+  input: { quantity?: number; unit_price?: number; discount_pct?: number; notes?: string },
+) {
+  assert(actor.type === "USER", "Chỉ nhân viên được cập nhật sản phẩm");
+  const item = get<OpportunityItem>("SELECT * FROM opportunity_items WHERE id = ?", itemId);
+  assert(item, "Không tìm thấy dòng sản phẩm");
+  mustOpen(item.opportunity_id);
+
+  const quantity = input.quantity !== undefined ? input.quantity : item.quantity;
+  const unitPrice = input.unit_price !== undefined ? input.unit_price : item.unit_price;
+  const discountPct = input.discount_pct !== undefined ? input.discount_pct : item.discount_pct;
+  assert(quantity > 0, "Số lượng sản phẩm phải lớn hơn 0");
+  assert(unitPrice >= 0, "Đơn giá không hợp lệ");
+  assert(discountPct >= 0 && discountPct <= 100, "Tỷ lệ chiết khấu phải từ 0 đến 100%");
+
+  const amount = Math.round(quantity * unitPrice * (1 - discountPct / 100));
+
+  tx(() => {
+    run(
+      `UPDATE opportunity_items
+       SET quantity = ?, unit_price = ?, discount_pct = ?, amount = ?, notes = COALESCE(?, notes)
+       WHERE id = ?`,
+      quantity,
+      unitPrice,
+      discountPct,
+      amount,
+      input.notes?.trim() ?? null,
+      itemId,
+    );
+    recalculateOpportunityRevenue(item.opportunity_id);
+    audit(actor, "opportunity", item.opportunity_id, "ITEM_UPDATE", { details: { itemId, ...input, amount } });
+  });
+}
+
+export function removeOpportunityItem(actor: Actor, itemId: number) {
+  assert(actor.type === "USER", "Chỉ nhân viên được xóa sản phẩm");
+  const item = get<OpportunityItem>("SELECT * FROM opportunity_items WHERE id = ?", itemId);
+  assert(item, "Không tìm thấy dòng sản phẩm");
+  mustOpen(item.opportunity_id);
+
+  tx(() => {
+    run("DELETE FROM opportunity_items WHERE id = ?", itemId);
+    recalculateOpportunityRevenue(item.opportunity_id);
+    audit(actor, "opportunity", item.opportunity_id, "ITEM_REMOVE", { details: { itemId } });
+  });
+}
+
+// ===== Hồ sơ giải pháp Presales & Duyệt chuyên môn (FR-41, FR-42, BR-07) =====
+export function listSolutions(opportunityId: number): SolutionRecord[] {
+  return all<SolutionRecord>(
+    `SELECT s.*, u.name AS creator_name
+     FROM solutions s
+     LEFT JOIN users u ON u.id = s.created_by
+     WHERE s.opportunity_id = ?
+     ORDER BY s.id DESC`,
+    opportunityId,
+  );
+}
+
+export function getSolution(id: number): SolutionRecord | undefined {
+  return get<SolutionRecord>(
+    `SELECT s.*, u.name AS creator_name
+     FROM solutions s
+     LEFT JOIN users u ON u.id = s.created_by
+     WHERE s.id = ?`,
+    id,
+  );
+}
+
+export function createSolution(
+  actor: Actor,
+  opportunityId: number,
+  input: {
+    title: string;
+    technical_approach?: string;
+    architecture?: string;
+    estimated_effort_mandays?: number;
+    integration_required?: boolean;
+    risks?: string;
+  },
+): { id: number } {
+  assert(actor.type === "USER" && (actor.role === "PRESALES" || actor.role === "PRESALES_MANAGER" || actor.role === "SALES_MANAGER" || actor.role === "ADMIN"), "Chỉ Presales có quyền lập phương án kỹ thuật");
+  mustOpen(opportunityId);
+  assert(input.title?.trim(), "Tiêu đề phương án kỹ thuật không được để trống");
+
+  const mandays = Math.max(0, input.estimated_effort_mandays ?? 0);
+  const integrationReq = input.integration_required ? 1 : 0;
+
+  let insertId = 0;
+  tx(() => {
+    const { id } = run(
+      `INSERT INTO solutions (opportunity_id, title, technical_approach, architecture, estimated_effort_mandays, integration_required, risks, status, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, datetime('now'), datetime('now'))`,
+      opportunityId,
+      input.title.trim(),
+      input.technical_approach?.trim() ?? null,
+      input.architecture?.trim() ?? null,
+      mandays,
+      integrationReq,
+      input.risks?.trim() ?? null,
+      actorUserId(actor),
+    );
+    insertId = id;
+
+    // Cập nhật proposed_solution tổng quan vào cơ hội
+    run(
+      `UPDATE opportunities
+       SET proposed_solution = ?, presales_id = COALESCE(presales_id, ?), solution_confirmed = 0, updated_at = datetime('now')
+       WHERE id = ?`,
+      input.title.trim() + (input.technical_approach ? `: ${input.technical_approach.trim()}` : ""),
+      actorUserId(actor),
+      opportunityId,
+    );
+
+    audit(actor, "opportunity", opportunityId, "SOLUTION_CREATE", { details: { solutionId: insertId, ...input } });
+  });
+
+  return { id: insertId };
+}
+
+export function updateSolution(
+  actor: Actor,
+  solutionId: number,
+  input: {
+    title?: string;
+    technical_approach?: string;
+    architecture?: string;
+    estimated_effort_mandays?: number;
+    integration_required?: boolean;
+    risks?: string;
+  },
+) {
+  assert(actor.type === "USER" && (actor.role === "PRESALES" || actor.role === "PRESALES_MANAGER" || actor.role === "SALES_MANAGER" || actor.role === "ADMIN"), "Chỉ Presales có quyền cập nhật phương án kỹ thuật");
+  const sol = getSolution(solutionId);
+  assert(sol, "Không tìm thấy hồ sơ giải pháp");
+  mustOpen(sol.opportunity_id);
+
+  const keys = Object.keys(input).filter((k) => input[k as keyof typeof input] !== undefined) as (keyof typeof input)[];
+  if (!keys.length) return;
+
+  tx(() => {
+    const params: (string | number | null)[] = [];
+    const sets = keys.map((k) => {
+      if (k === "integration_required") {
+        params.push(input[k] ? 1 : 0);
+        return "integration_required = ?";
+      }
+      params.push((input[k] ?? null) as string | number | null);
+      return `${k} = ?`;
+    });
+
+    run(
+      `UPDATE solutions SET ${sets.join(", ")}, updated_at = datetime('now') WHERE id = ?`,
+      ...params,
+      solutionId,
+    );
+
+    // Bất kỳ cập nhật giải pháp nào cũng đưa solution_confirmed về 0 để kiểm tra lại
+    run("UPDATE opportunities SET solution_confirmed = 0 WHERE id = ?", sol.opportunity_id);
+
+    audit(actor, "opportunity", sol.opportunity_id, "SOLUTION_UPDATE", { details: { solutionId, ...input } });
+  });
+}
+
+/** Kiểm tra cơ hội có thuộc diện duyệt chuyên môn theo BR-07 không */
+export function isExpertReviewRequired(opp: Opportunity): { required: boolean; reason: string } {
+  const enabled = setting("expert_review_enabled") !== "false";
+  if (!enabled) return { required: false, reason: "Tính năng duyệt chuyên môn đang tắt" };
+
+  const minAmount = Number(setting("expert_review_min_amount") || "500000000");
+  if (opp.amount >= minAmount) {
+    return { required: true, reason: `Doanh thu cơ hội (${opp.amount.toLocaleString("vi-VN")} VND) >= ngưỡng ${minAmount.toLocaleString("vi-VN")} VND` };
+  }
+
+  // Kiểm tra giải pháp có yêu cầu tích hợp hoặc công sức >= 30 mandays
+  const solutions = listSolutions(opp.id);
+  const intSol = solutions.find((s) => s.integration_required === 1);
+  if (intSol) {
+    return { required: true, reason: `Giải pháp '${intSol.title}' có yêu cầu tích hợp hệ thống` };
+  }
+
+  const heavySol = solutions.find((s) => s.estimated_effort_mandays >= 30);
+  if (heavySol) {
+    return { required: true, reason: `Công sức triển khai giải pháp (${heavySol.estimated_effort_mandays} mandays) >= 30 mandays` };
+  }
+
+  return { required: false, reason: "Không thuộc diện bắt buộc duyệt chuyên môn" };
+}
+
+export function submitExpertReview(actor: Actor, opportunityId: number) {
+  const o = mustOpen(opportunityId);
+  const check = isExpertReviewRequired(o);
+  assert(check.required, "Cơ hội không thuộc diện cần gửi duyệt chuyên môn: " + check.reason);
+
+  tx(() => {
+    run("UPDATE opportunities SET expert_review_status = 'PENDING', updated_at = datetime('now') WHERE id = ?", opportunityId);
+    audit(actor, "opportunity", opportunityId, "EXPERT_REVIEW_SUBMIT", { details: { reason: check.reason } });
+    notify(null, `Cơ hội ${o.code} yêu cầu Quản lý tư vấn giải pháp duyệt chuyên môn (${check.reason})`, `/opportunities/${opportunityId}`);
+  });
+}
+
+export function reviewExpertSolution(
+  actor: Actor,
+  opportunityId: number,
+  decision: "APPROVED" | "REJECTED",
+  note?: string,
+) {
+  assert(actor.type === "USER", "Chỉ nhân viên được thực hiện duyệt chuyên môn");
+  assert(
+    actor.role === "PRESALES_MANAGER" || actor.role === "ADMIN" || (actor.role && can(actor.role, "opp.expert_review")),
+    "Cổng kiểm soát FR-42: Chỉ Quản lý tư vấn giải pháp (PRESALES_MANAGER) mới có quyền duyệt chuyên môn",
+  );
+  const o = mustOpen(opportunityId);
+
+  tx(() => {
+    run(
+      "UPDATE opportunities SET expert_review_status = ?, solution_confirmed = CASE WHEN ? = 'APPROVED' THEN 1 ELSE 0 END, updated_at = datetime('now') WHERE id = ?",
+      decision,
+      decision,
+      opportunityId,
+    );
+    audit(actor, "opportunity", opportunityId, "EXPERT_REVIEW_DECISION", { details: { decision, note } });
+    notify(o.owner_id, `Quản lý tư vấn giải pháp đã ${decision === "APPROVED" ? "phê duyệt" : "từ chối"} chuyên môn giải pháp cơ hội ${o.code}`, `/opportunities/${opportunityId}`);
+  });
+}
+
+// ===== Stakeholders & Đối thủ (FR-39, FR-40, BR-19) =====
 export function stakeholdersOf(id: number) {
   return all<{ id: number; name: string; role: string; notes: string | null; contact_id: number | null }>(
     "SELECT * FROM stakeholders WHERE opportunity_id = ? ORDER BY id",
@@ -79,21 +544,355 @@ export function stakeholdersOf(id: number) {
   );
 }
 
+export function addStakeholder(
+  actor: Actor,
+  id: number,
+  input: { name: string; role: string; notes?: string | null; contact_id?: number | null },
+) {
+  mustOpen(id);
+  assert(input.name?.trim(), "Thiếu tên bên liên quan");
+  assert(input.role?.trim(), "Thiếu vai trò bên liên quan");
+  // BR-19: Hỗ trợ 1 người liên hệ giữ nhiều vai trò trong cùng cơ hội
+  run(
+    "INSERT INTO stakeholders (opportunity_id, contact_id, name, role, notes) VALUES (?, ?, ?, ?, ?)",
+    id,
+    input.contact_id ?? null,
+    input.name.trim(),
+    input.role.trim(),
+    input.notes?.trim() ?? null,
+  );
+  audit(actor, "opportunity", id, "STAKEHOLDER_ADD", { details: input });
+}
+
+export function removeStakeholder(actor: Actor, id: number, stakeholderId: number) {
+  mustOpen(id);
+  run("DELETE FROM stakeholders WHERE id = ? AND opportunity_id = ?", stakeholderId, id);
+  if (!stakeholdersOf(id).some((s) => s.role === "DECISION_MAKER")) {
+    run("UPDATE opportunities SET stakeholders_confirmed = 0 WHERE id = ?", id);
+  }
+  audit(actor, "opportunity", id, "STAKEHOLDER_REMOVE", { details: { stakeholderId } });
+}
+
 export function competitorsOf(id: number) {
-  return all<{ id: number; competitor_id: number; name: string; notes: string | null; strengths: string | null; weaknesses: string | null }>(
+  return all<{
+    id: number;
+    competitor_id: number;
+    name: string;
+    notes: string | null;
+    strengths: string | null;
+    weaknesses: string | null;
+  }>(
     `SELECT oc.id, oc.competitor_id, c.name, oc.notes, c.strengths, c.weaknesses
      FROM opportunity_competitors oc JOIN competitors c ON c.id = oc.competitor_id WHERE oc.opportunity_id = ?`,
     id,
   );
 }
 
-export function risksOf(id: number) {
-  return all<{ id: number; description: string; severity: string; status: string; source: string; resolution: string | null; created_at: string }>(
-    "SELECT * FROM opportunity_risks WHERE opportunity_id = ? ORDER BY status, id DESC",
+export function addCompetitor(actor: Actor, id: number, competitorId: number, notes: string | null) {
+  mustOpen(id);
+  assert(get("SELECT id FROM competitors WHERE id = ?", competitorId), "Đối thủ không tồn tại");
+  run("INSERT OR IGNORE INTO opportunity_competitors (opportunity_id, competitor_id, notes) VALUES (?, ?, ?)", id, competitorId, notes);
+  audit(actor, "opportunity", id, "COMPETITOR_ADD", { details: { competitorId, notes } });
+}
+
+export function removeCompetitor(actor: Actor, id: number, linkId: number) {
+  mustOpen(id);
+  run("DELETE FROM opportunity_competitors WHERE id = ? AND opportunity_id = ?", linkId, id);
+  if (!competitorsOf(id).length) run("UPDATE opportunities SET competitors_confirmed = 0 WHERE id = ?", id);
+  audit(actor, "opportunity", id, "COMPETITOR_REMOVE", { details: { linkId } });
+}
+
+// ===== Rủi ro & Tương thích ngược =====
+export function risksOf(id: number): OpportunityRisk[] {
+  return listRisks(id);
+}
+
+// ===== Checklist & Stage Gates (FR-42, FR-45, FR-46, BR-06, BR-07) =====
+export function checklistStatus(o: Opportunity) {
+  return DEVELOP_CHECKLIST.map((c) => ({ ...c, done: Boolean(o[c.key]) }));
+}
+
+export function setChecklist(actor: Actor, id: number, key: ChecklistKey, value: boolean) {
+  assert(actor.type === "USER", "Agent không được tự hoàn thành mục kiểm soát");
+  assert(DEVELOP_CHECKLIST.some((c) => c.key === key), "Mục checklist không hợp lệ");
+  const o = mustOpen(id);
+  assert(o.stage === "DEVELOP", "Checklist chỉ cập nhật ở giai đoạn Phát triển cơ hội (DEVELOP)");
+
+  if (value) {
+    if (key === "need_confirmed") {
+      assert(o.customer_need?.trim() || getScopeDocument(id), "Cần nhập nhu cầu khách hàng hoặc tạo biên bản phạm vi trước");
+    }
+    if (key === "solution_confirmed") {
+      assert(
+        actor.role === "PRESALES" || actor.role === "PRESALES_MANAGER" || actor.role === "SALES_MANAGER" || actor.role === "ADMIN",
+        "Chỉ Presales hoặc Quản lý được xác nhận giải pháp",
+      );
+      assert(o.proposed_solution?.trim() || listSolutions(id).length > 0, "Chưa có đề xuất phương án giải pháp");
+    }
+    if (key === "stakeholders_confirmed") {
+      assert(stakeholdersOf(id).some((s) => s.role === "DECISION_MAKER"), "Cần ít nhất một stakeholder là Người quyết định (DECISION_MAKER)");
+    }
+    if (key === "competitors_confirmed") {
+      assert(competitorsOf(id).length > 0, "Cần ghi nhận ít nhất một đối thủ cạnh tranh");
+    }
+  }
+
+  tx(() => {
+    run(`UPDATE opportunities SET ${key} = ?, updated_at = datetime('now') WHERE id = ?`, value ? 1 : 0, id);
+    audit(actor, "opportunity", id, value ? "CHECKLIST_DONE" : "CHECKLIST_UNDO", { details: { key } });
+  });
+}
+
+/** BR-06: Cổng rà soát của Quản lý kinh doanh */
+export function managerGate(o: Opportunity): { required: boolean; reasons: string[] } {
+  const mode = setting("manager_gate_mode");
+  if (mode === "NEVER") return { required: false, reasons: [] };
+  if (mode === "ALWAYS") return { required: true, reasons: ["Chính sách: Mọi cơ hội cần Sales Manager rà soát"] };
+
+  const reasons: string[] = [];
+  if (o.importance === "HIGH") reasons.push("Mức quan trọng Cao (HIGH)");
+  const openRisks = listRisks(o.id).filter((r) => r.status === "OPEN").length;
+  if (openRisks > 0) reasons.push(`${openRisks} rủi ro chưa xử lý (OPEN)`);
+
+  return { required: reasons.length > 0, reasons };
+}
+
+function latestGateApproval(id: number) {
+  return get<{ id: number; status: string; created_at: string }>(
+    "SELECT id, status, created_at FROM approvals WHERE kind='OPP_STAGE_GATE' AND entity_id = ? ORDER BY id DESC LIMIT 1",
     id,
   );
 }
 
+export function gateState(o: Opportunity) {
+  const gate = managerGate(o);
+  const approval = latestGateApproval(o.id);
+  return { ...gate, approval: approval ?? null };
+}
+
+export function stageHistoryOf(opportunityId: number): StageHistoryRecord[] {
+  return all<StageHistoryRecord>(
+    `SELECT sh.*, u.name AS moved_by_name
+     FROM opportunity_stage_history sh
+     LEFT JOIN users u ON u.id = sh.moved_by
+     WHERE sh.opportunity_id = ?
+     ORDER BY sh.id DESC`,
+    opportunityId,
+  );
+}
+
+export function moveStage(actor: Actor, id: number, to: Opportunity["stage"], reason?: string) {
+  const o = getOpportunity(id);
+  assert(o, "Không tìm thấy cơ hội");
+  tx(() => {
+    run(
+      `UPDATE opportunities
+       SET stage = ?, updated_at = datetime('now'),
+           closed_at = CASE WHEN ? IN ('WON', 'LOST') THEN datetime('now') ELSE closed_at END
+       WHERE id = ?`,
+      to,
+      to,
+      id,
+    );
+    run(
+      `INSERT INTO opportunity_stage_history (opportunity_id, from_stage, to_stage, moved_by, reason)
+       VALUES (?, ?, ?, ?, ?)`,
+      id,
+      o.stage,
+      to,
+      actorUserId(actor),
+      reason ?? null,
+    );
+    audit(actor, "opportunity", id, "STAGE_CHANGE", { from: o.stage, to, reason });
+  });
+}
+
+export function advanceStage(actor: Actor, id: number): { moved: boolean; message: string } {
+  assert(actor.type === "USER", "Agent không được tự chuyển giai đoạn");
+  const o = mustOpen(id);
+
+  if (o.stage === "DEVELOP") {
+    // 1. Kiểm tra 4 mục checklist bắt buộc (FR-46)
+    const missing = checklistStatus(o).filter((c) => !c.done);
+    assert(!missing.length, `Chưa hoàn tất checklist: ${missing.map((m) => m.label).join("; ")}`);
+    assert(o.price_list_id, "Chưa chọn bảng giá");
+
+    // 2. Kiểm tra Cổng duyệt chuyên môn (FR-42, BR-07)
+    const expCheck = isExpertReviewRequired(o);
+    if (expCheck.required && o.expert_review_status !== "APPROVED") {
+      if (o.expert_review_status === "PENDING") {
+        return { moved: false, message: "Đang chờ Quản lý tư vấn giải pháp duyệt chuyên môn (FR-42)" };
+      }
+      return {
+        moved: false,
+        message: `Cần Quản lý tư vấn giải pháp duyệt chuyên môn (${expCheck.reason}). Vui lòng gửi yêu cầu duyệt chuyên môn trước.`,
+      };
+    }
+
+    // 3. Kiểm tra Cổng Quản lý kinh doanh rà soát (FR-45, BR-06)
+    const gate = gateState(o);
+    if (gate.required && gate.approval?.status !== "APPROVED") {
+      if (gate.approval?.status === "PENDING") {
+        return { moved: false, message: "Đang chờ Sales Manager rà soát theo BR-06" };
+      }
+      requestApproval(actor, {
+        kind: "OPP_STAGE_GATE",
+        entityType: "opportunity",
+        entityId: id,
+        reason: gate.reasons.join("; "),
+      });
+      return { moved: false, message: `Cần Sales Manager rà soát (${gate.reasons.join("; ")}). Đã gửi yêu cầu phê duyệt.` };
+    }
+
+    moveStage(actor, id, "PROPOSE");
+    return { moved: true, message: "Đã chuyển sang giai đoạn Đề xuất giải pháp (PROPOSE)" };
+  }
+
+  if (o.stage === "PROPOSE") {
+    assert(
+      get("SELECT id FROM quotes WHERE opportunity_id = ? AND status = 'ACCEPTED'", id),
+      "Cần ít nhất một báo giá được khách chấp thuận (ACCEPTED) trước khi tạo đơn hàng",
+    );
+    moveStage(actor, id, "CLOSE");
+    return { moved: true, message: "Đã chuyển sang giai đoạn Tạo đơn hàng (CLOSE)" };
+  }
+
+  throw new Error("Ở giai đoạn Close, việc hoàn tất đơn hàng sẽ tự động đánh dấu Thành công (WON)");
+}
+
+// ===== Đóng & Mở lại cơ hội (FR-47, BR-17, BR-27) =====
+export function markLost(actor: Actor, id: number, reasonCode: string, note?: string) {
+  assert(actor.type === "USER", "Agent không được đóng Cơ hội");
+  assert(reasonCode?.trim(), "Phải chọn lý do thất bại");
+
+  const validReasons = [
+    "Mất vào đối thủ",
+    "Không có ngân sách",
+    "Khách hoãn hoặc dừng dự án",
+    "Không đáp ứng yêu cầu",
+    "Bàn giao sai chuẩn từ bước đánh giá",
+    "Khác",
+    // Tương thích ngược:
+    "Thua đối thủ",
+    "Giá không phù hợp",
+    "Khách hoãn dự án",
+    "Không đáp ứng yêu cầu kỹ thuật",
+    "Mất liên lạc",
+  ];
+  assert(validReasons.includes(reasonCode.trim()), `Lý do thất bại '${reasonCode}' không hợp lệ`);
+
+  if (reasonCode.trim() === "Khác") {
+    assert(note?.trim(), "Trường hợp lý do 'Khác' bắt buộc phải nhập ghi chú giải thích");
+  }
+
+  const o = mustOpen(id);
+  const finalReason = note?.trim() ? `${reasonCode.trim()}: ${note.trim()}` : reasonCode.trim();
+
+  tx(() => {
+    run(
+      "UPDATE opportunities SET stage = 'LOST', lost_reason = ?, lost_reason_code = ?, closed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
+      finalReason,
+      reasonCode.trim(),
+      id,
+    );
+    run(
+      "INSERT INTO opportunity_stage_history (opportunity_id, from_stage, to_stage, moved_by, reason) VALUES (?, ?, 'LOST', ?, ?)",
+      id,
+      o.stage,
+      actorUserId(actor),
+      finalReason,
+    );
+    run(
+      "UPDATE quotes SET status='SUPERSEDED', updated_at=datetime('now') WHERE opportunity_id=? AND status IN ('DRAFT','PENDING_APPROVAL','APPROVED','SENT')",
+      id,
+    );
+    audit(actor, "opportunity", id, "STAGE_CHANGE", {
+      from: o.stage,
+      to: "LOST",
+      reason: finalReason,
+      details: { reasonCode: reasonCode.trim() },
+    });
+  });
+}
+
+export function reopenOpportunity(actor: Actor, id: number, reason: string) {
+  assert(actor.type === "USER", "Agent không được mở lại cơ hội");
+  assert(
+    actor.role === "SALES_MANAGER" || actor.role === "ADMIN" || (actor.role && can(actor.role, "opp.reopen")),
+    "Cổng kiểm soát BR-17: Chỉ Quản lý kinh doanh (SALES_MANAGER) mới có quyền mở lại cơ hội đã đóng",
+  );
+  assert(reason?.trim(), "Bắt buộc phải ghi rõ lý do mở lại cơ hội theo BR-17");
+
+  const o = getOpportunity(id);
+  assert(o, "Không tìm thấy cơ hội");
+  assert(o.stage === "WON" || o.stage === "LOST", "Chỉ có thể mở lại cơ hội đã đóng (WON hoặc LOST)");
+
+  // Kiểm tra thời hạn 90 ngày theo BR-17
+  const reopenDays = Number(setting("reopen_window_days") || "90");
+  if (o.closed_at) {
+    const closedDate = new Date(o.closed_at);
+    const now = new Date();
+    const diffDays = Math.floor((now.getTime() - closedDate.getTime()) / (1000 * 60 * 60 * 24));
+    assert(
+      diffDays <= reopenDays,
+      `Đã quá thời hạn ${reopenDays} ngày kể từ khi đóng cơ hội (đã đóng ${diffDays} ngày), không thể mở lại theo quy tắc BR-17`,
+    );
+  }
+
+  tx(() => {
+    run(
+      `UPDATE opportunities
+       SET stage = 'DEVELOP',
+           closed_at = NULL,
+           reopened_at = datetime('now'),
+           reopened_by = ?,
+           reopen_reason = ?,
+           updated_at = datetime('now')
+       WHERE id = ?`,
+      actorUserId(actor),
+      reason.trim(),
+      id,
+    );
+    run(
+      `INSERT INTO opportunity_stage_history (opportunity_id, from_stage, to_stage, moved_by, reason)
+       VALUES (?, ?, 'DEVELOP', ?, ?)`,
+      id,
+      o.stage,
+      actorUserId(actor),
+      `Mở lại cơ hội: ${reason.trim()}`,
+    );
+    audit(actor, "opportunity", id, "OPPORTUNITY_REOPEN", {
+      from: o.stage,
+      to: "DEVELOP",
+      reason: reason.trim(),
+    });
+  });
+}
+
+// ===== Hợp đồng cung cấp dữ liệu cho WP-04 (Báo giá & Đơn hàng) =====
+export function getOpportunityForQuote(opportunityId: number) {
+  const o = getOpportunity(opportunityId);
+  assert(o, "Không tìm thấy cơ hội");
+  const items = listOpportunityItems(opportunityId);
+  const account = get<{ id: number; name: string }>("SELECT id, name FROM accounts WHERE id = ?", o.account_id);
+  const primaryContact = o.primary_contact_id
+    ? get<{ id: number; full_name: string; email: string | null; phone: string | null }>(
+        "SELECT id, full_name, email, phone FROM contacts WHERE id = ?",
+        o.primary_contact_id,
+      )
+    : null;
+
+  return {
+    opportunity: o,
+    account,
+    primaryContact,
+    items,
+    priceListId: o.price_list_id,
+    stakeholders: stakeholdersOf(opportunityId),
+  };
+}
+
+// ===== Nghiên cứu AI & Tương thích ngược =====
 export function researchOf(id: number) {
   return all<{
     id: number;
@@ -114,206 +913,10 @@ export function researchOf(id: number) {
   );
 }
 
-export function updateOpportunity(
-  actor: Actor,
-  id: number,
-  input: { name?: string; amount?: number; close_date?: string | null; customer_need?: string | null; price_list_id?: number | null; primary_contact_id?: number | null; presales_id?: number | null },
-) {
-  // Trường trọng yếu (revenue, close date, stage, price list) chỉ do con người cập nhật.
-  assert(actor.type === "USER", "Chỉ nhân viên được cập nhật hồ sơ Opportunity");
-  const o = mustOpen(id);
-  const keys = Object.keys(input).filter((k) => input[k as keyof typeof input] !== undefined) as (keyof typeof input)[];
-  if (!keys.length) return;
-  if (input.amount !== undefined) assert(input.amount >= 0, "Giá trị dự kiến không hợp lệ");
-  if (input.price_list_id !== undefined && input.price_list_id !== o.price_list_id) {
-    assert(o.stage === "DEVELOP", "Chỉ đổi bảng giá ở giai đoạn Develop");
-  }
-  tx(() => {
-    run(
-      `UPDATE opportunities SET ${keys.map((k) => `${k} = ?`).join(", ")}, updated_at = datetime('now') WHERE id = ?`,
-      ...keys.map((k) => (input[k] ?? null) as string | number | null),
-      id,
-    );
-    // Nhu cầu thay đổi thì phải xác nhận lại.
-    if (input.customer_need !== undefined && input.customer_need !== o.customer_need) {
-      run("UPDATE opportunities SET need_confirmed = 0 WHERE id = ?", id);
-    }
-    audit(actor, "opportunity", id, "UPDATE", { details: input });
-  });
-}
-
 export function setProposedSolution(actor: Actor, id: number, solution: string) {
-  assert(actor.type === "USER" && (actor.role === "PRESALES" || actor.role === "SALES_MANAGER"), "Presales quyết định giải pháp");
-  const o = mustOpen(id);
-  tx(() => {
-    run(
-      "UPDATE opportunities SET proposed_solution = ?, solution_confirmed = 0, presales_id = COALESCE(presales_id, ?), updated_at = datetime('now') WHERE id = ?",
-      solution.trim() || null,
-      actor.id,
-      id,
-    );
-    audit(actor, "opportunity", id, "SOLUTION_UPDATE");
-    notify(o.owner_id, `Presales đã cập nhật Proposed Solution cho ${o.code}`, `/opportunities/${id}`);
-  });
+  createSolution(actor, id, { title: solution });
 }
 
-export function setChecklist(actor: Actor, id: number, key: ChecklistKey, value: boolean) {
-  assert(actor.type === "USER", "Agent không được tự hoàn thành checklist");
-  assert(DEVELOP_CHECKLIST.some((c) => c.key === key), "Mục checklist không hợp lệ");
-  const o = mustOpen(id);
-  assert(o.stage === "DEVELOP", "Checklist chỉ cập nhật ở giai đoạn Develop");
-  if (value) {
-    if (key === "need_confirmed") assert(o.customer_need?.trim(), "Cần nhập Customer Need trước");
-    if (key === "solution_confirmed") {
-      assert(actor.role === "PRESALES" || actor.role === "SALES_MANAGER", "Chỉ Presales xác nhận giải pháp");
-      assert(o.proposed_solution?.trim(), "Chưa có Proposed Solution");
-    }
-    if (key === "stakeholders_confirmed") {
-      assert(stakeholdersOf(id).some((s) => s.role === "DECISION_MAKER"), "Cần ít nhất một stakeholder là Người quyết định");
-    }
-    if (key === "competitors_confirmed") assert(competitorsOf(id).length > 0, "Cần ghi nhận ít nhất một đối thủ");
-  }
-  tx(() => {
-    run(`UPDATE opportunities SET ${key} = ?, updated_at = datetime('now') WHERE id = ?`, value ? 1 : 0, id);
-    audit(actor, "opportunity", id, value ? "CHECKLIST_DONE" : "CHECKLIST_UNDO", { details: { key } });
-  });
-}
-
-export function addStakeholder(actor: Actor, id: number, input: { name: string; role: string; notes?: string | null; contact_id?: number | null }) {
-  mustOpen(id);
-  assert(input.name?.trim(), "Thiếu tên stakeholder");
-  run(
-    "INSERT INTO stakeholders (opportunity_id, contact_id, name, role, notes) VALUES (?,?,?,?,?)",
-    id, input.contact_id ?? null, input.name.trim(), input.role, input.notes ?? null,
-  );
-  audit(actor, "opportunity", id, "STAKEHOLDER_ADD", { details: input });
-}
-
-export function removeStakeholder(actor: Actor, id: number, stakeholderId: number) {
-  mustOpen(id);
-  run("DELETE FROM stakeholders WHERE id = ? AND opportunity_id = ?", stakeholderId, id);
-  if (!stakeholdersOf(id).some((s) => s.role === "DECISION_MAKER")) {
-    run("UPDATE opportunities SET stakeholders_confirmed = 0 WHERE id = ?", id);
-  }
-  audit(actor, "opportunity", id, "STAKEHOLDER_REMOVE", { details: { stakeholderId } });
-}
-
-export function addCompetitor(actor: Actor, id: number, competitorId: number, notes: string | null) {
-  mustOpen(id);
-  assert(get("SELECT id FROM competitors WHERE id = ?", competitorId), "Đối thủ không tồn tại");
-  run("INSERT OR IGNORE INTO opportunity_competitors (opportunity_id, competitor_id, notes) VALUES (?,?,?)", id, competitorId, notes);
-  audit(actor, "opportunity", id, "COMPETITOR_ADD", { details: { competitorId } });
-}
-
-export function removeCompetitor(actor: Actor, id: number, linkId: number) {
-  mustOpen(id);
-  run("DELETE FROM opportunity_competitors WHERE id = ? AND opportunity_id = ?", linkId, id);
-  if (!competitorsOf(id).length) run("UPDATE opportunities SET competitors_confirmed = 0 WHERE id = ?", id);
-  audit(actor, "opportunity", id, "COMPETITOR_REMOVE", { details: { linkId } });
-}
-
-export function addRisk(actor: Actor, id: number, description: string, severity: string, source: "USER" | "AI" = "USER") {
-  mustOpen(id);
-  assert(description?.trim(), "Thiếu mô tả rủi ro");
-  run(
-    "INSERT INTO opportunity_risks (opportunity_id, description, severity, source, created_by) VALUES (?,?,?,?,?)",
-    id, description.trim(), severity, source, actorUserId(actor),
-  );
-  audit(actor, "opportunity", id, "RISK_ADD", { details: { description, severity } });
-}
-
-export function resolveRisk(actor: Actor, id: number, riskId: number, resolution: string) {
-  assert(resolution?.trim(), "Cần ghi cách xử lý rủi ro");
-  run(
-    "UPDATE opportunity_risks SET status='RESOLVED', resolution=?, resolved_by=?, resolved_at=datetime('now') WHERE id=? AND opportunity_id=?",
-    resolution.trim(), actorUserId(actor), riskId, id,
-  );
-  audit(actor, "opportunity", id, "RISK_RESOLVE", { details: { riskId, resolution } });
-}
-
-export function checklistStatus(o: Opportunity) {
-  return DEVELOP_CHECKLIST.map((c) => ({ ...c, done: Boolean(o[c.key]) }));
-}
-
-/** ADR-05 (tạm theo đề xuất brief): gate có điều kiện trước khi rời Develop. */
-export function managerGate(o: Opportunity): { required: boolean; reasons: string[] } {
-  const mode = setting("manager_gate_mode");
-  if (mode === "NEVER") return { required: false, reasons: [] };
-  if (mode === "ALWAYS") return { required: true, reasons: ["Chính sách: mọi Opportunity cần Manager rà soát"] };
-  const reasons: string[] = [];
-  if (o.importance === "HIGH") reasons.push("Mức quan trọng Cao");
-  const open = risksOf(o.id).filter((r) => r.status === "OPEN").length;
-  if (open) reasons.push(`${open} rủi ro chưa xử lý`);
-  return { required: reasons.length > 0, reasons };
-}
-
-function latestGateApproval(id: number) {
-  return get<{ id: number; status: string; created_at: string }>(
-    "SELECT id, status, created_at FROM approvals WHERE kind='OPP_STAGE_GATE' AND entity_id = ? ORDER BY id DESC LIMIT 1",
-    id,
-  );
-}
-
-export function gateState(o: Opportunity) {
-  const gate = managerGate(o);
-  const approval = latestGateApproval(o.id);
-  return { ...gate, approval: approval ?? null };
-}
-
-/** Thực hiện chuyển stage (dùng chung cho AE và khi Manager duyệt gate). */
-export function moveStage(actor: Actor, id: number, to: Opportunity["stage"], reason?: string) {
-  const o = getOpportunity(id);
-  assert(o, "Không tìm thấy Opportunity");
-  tx(() => {
-    run(
-      `UPDATE opportunities SET stage = ?, updated_at = datetime('now'), closed_at = CASE WHEN ? IN ('WON','LOST') THEN datetime('now') ELSE closed_at END WHERE id = ?`,
-      to, to, id,
-    );
-    audit(actor, "opportunity", id, "STAGE_CHANGE", { from: o.stage, to, reason });
-  });
-}
-
-export function advanceStage(actor: Actor, id: number): { moved: boolean; message: string } {
-  assert(actor.type === "USER", "Agent không được tự chuyển stage");
-  const o = mustOpen(id);
-  if (o.stage === "DEVELOP") {
-    const missing = checklistStatus(o).filter((c) => !c.done);
-    assert(!missing.length, `Chưa hoàn tất checklist: ${missing.map((m) => m.label).join("; ")}`);
-    assert(o.price_list_id, "Chưa chọn bảng giá");
-    const gate = gateState(o);
-    if (gate.required && gate.approval?.status !== "APPROVED") {
-      if (gate.approval?.status === "PENDING") return { moved: false, message: "Đang chờ Sales Manager rà soát" };
-      requestApproval(actor, {
-        kind: "OPP_STAGE_GATE",
-        entityType: "opportunity",
-        entityId: id,
-        reason: gate.reasons.join("; "),
-      });
-      return { moved: false, message: `Cần Sales Manager rà soát (${gate.reasons.join("; ")}). Đã gửi yêu cầu.` };
-    }
-    moveStage(actor, id, "PROPOSE");
-    return { moved: true, message: "Đã chuyển sang Propose" };
-  }
-  if (o.stage === "PROPOSE") {
-    assert(get("SELECT id FROM quotes WHERE opportunity_id = ? AND status = 'ACCEPTED'", id), "Cần báo giá được khách chấp thuận");
-    moveStage(actor, id, "CLOSE");
-    return { moved: true, message: "Đã chuyển sang Close" };
-  }
-  throw new Error("Ở giai đoạn Close, tạo Order để ghi nhận Won");
-}
-
-export function markLost(actor: Actor, id: number, reason: string) {
-  assert(actor.type === "USER", "Agent không được đóng Opportunity");
-  assert(reason?.trim(), "Phải nhập lý do Lost");
-  mustOpen(id);
-  tx(() => {
-    run("UPDATE opportunities SET lost_reason = ? WHERE id = ?", reason.trim(), id);
-    moveStage(actor, id, "LOST", reason);
-    run("UPDATE quotes SET status='SUPERSEDED', updated_at=datetime('now') WHERE opportunity_id=? AND status IN ('DRAFT','PENDING_APPROVAL','APPROVED','SENT')", id);
-  });
-}
-
-/** AE xác minh nghiên cứu của Agent rồi mới cập nhật hồ sơ (importance, rủi ro). */
 export function verifyResearch(actor: Actor, researchId: number, opts: { applyImportance: boolean; riskIndexes: number[] }) {
   assert(actor.type === "USER", "Chỉ nhân viên xác minh nghiên cứu");
   const r = get<{ id: number; opportunity_id: number; importance: string; risks_json: string; status: string }>(
@@ -331,7 +934,16 @@ export function verifyResearch(actor: Actor, researchId: number, opts: { applyIm
     }
     for (const i of opts.riskIndexes) {
       const risk = risks[i];
-      if (risk) addRisk(actor, o.id, risk.description, risk.severity ?? "MEDIUM", "AI");
+      if (risk) {
+        run(
+          "INSERT INTO opportunity_risks (opportunity_id, description, severity, source, created_by) VALUES (?,?,?,?,?)",
+          o.id,
+          risk.description,
+          risk.severity ?? "MEDIUM",
+          "AI",
+          actorUserId(actor),
+        );
+      }
     }
     audit(actor, "opportunity_research", researchId, "VERIFY", {
       from: "PENDING_REVIEW",
@@ -342,6 +954,10 @@ export function verifyResearch(actor: Actor, researchId: number, opts: { applyIm
 }
 
 export function dismissResearch(actor: Actor, researchId: number) {
-  run("UPDATE opportunity_research SET status='DISMISSED', reviewed_by=?, reviewed_at=datetime('now') WHERE id=? AND status='PENDING_REVIEW'", actorUserId(actor), researchId);
+  run(
+    "UPDATE opportunity_research SET status='DISMISSED', reviewed_by=?, reviewed_at=datetime('now') WHERE id=? AND status='PENDING_REVIEW'",
+    actorUserId(actor),
+    researchId,
+  );
   audit(actor, "opportunity_research", researchId, "DISMISS", { from: "PENDING_REVIEW", to: "DISMISSED" });
 }

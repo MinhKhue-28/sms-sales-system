@@ -1,6 +1,7 @@
 // Dữ liệu mẫu cho demo (tên doanh nghiệp/người là hư cấu).
 import type { DatabaseSync } from "node:sqlite";
 import { SETTING_DEFAULTS } from "../settings-defaults";
+import { runAllSeeds } from "./seeds";
 
 export function seed(db: DatabaseSync) {
   const ins = (sql: string, ...p: (string | number | null)[]) => Number(db.prepare(sql).run(...p).lastInsertRowid);
@@ -174,6 +175,9 @@ export function seed(db: DatabaseSync) {
     log("opportunity", oHP, "CREATE", "WON");
     log("order", ord, "CREATE", "IN_FULFILLMENT");
     void manager;
+
+    // Chạy các seed mở rộng của từng WP (WP-00, WP-01, ...)
+    runAllSeeds(db);
 
     db.exec("COMMIT");
   } catch (e) {

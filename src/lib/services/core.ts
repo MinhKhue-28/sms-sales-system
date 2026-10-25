@@ -16,7 +16,7 @@ export function userActor(u: { id: number; name: string; role: Role }): Actor {
 function actorLabel(a: Actor): string {
   switch (a.type) {
     case "USER":
-      return a.name;
+      return a.name || (a.id ? `User #${a.id}` : "Người dùng");
     case "AI":
       return a.agent === "QUALIFICATION" ? "Sales Qualification Agent" : "Sales Opportunity Agent";
     case "INTEGRATION":
@@ -46,7 +46,7 @@ export function audit(
     opts.from ?? null,
     opts.to ?? null,
     actor.type,
-    actor.type === "USER" ? actor.id : actor.type === "AI" ? actor.runId : null,
+    actor.type === "USER" ? (actor.id ?? null) : actor.type === "AI" ? (actor.runId ?? null) : null,
     actorLabel(actor),
     opts.reason ?? null,
     opts.details === undefined ? null : JSON.stringify(opts.details),

@@ -3,51 +3,103 @@ import { all } from "@/lib/db";
 import { ROLE_LABEL, type Role } from "@/lib/domain";
 import { Icon } from "@/components/icons";
 import { Persona } from "@/components/ui";
-import { loginAction } from "./actions";
+import { loginAction, passwordLoginAction } from "./actions";
 
 export const metadata: Metadata = { title: "Đăng nhập" };
 export const dynamic = "force-dynamic";
 
 const ROLE_DESC: Record<Role, string> = {
-  SALES: "Quản lý Lead, Opportunity, báo giá, kiểm duyệt AI",
+  SALES: "Quản lý Lead, Opportunity, báo giá, duyệt đề xuất AI",
   PRESALES: "Xây dựng Proposed Solution, xác nhận kỹ thuật",
-  SALES_MANAGER: "Giám sát pipeline, duyệt chiết khấu và gate",
-  FINANCE: "Phát hành hóa đơn, ghi nhận thanh toán",
-  LEGAL: "Rà soát điều khoản đặc thù",
-  DELIVERY: "Cấp license, triển khai, đào tạo",
-  ADMIN: "Cấu hình Agent, tham số, nhật ký",
+  PRESALES_MANAGER: "Rà soát chuyên môn giải pháp (FR-42)",
+  SALES_MANAGER: "Giám sát pipeline, duyệt chiết khấu, gate, tiêu chí AI",
+  FINANCE: "Phát hành hóa đơn, ghi nhận thanh toán, công nợ",
+  LEGAL: "Rà soát điều khoản pháp lý đặc thù",
+  DELIVERY: "Cấp license, triển khai kỹ thuật, đào tạo",
+  ADMIN: "Quản trị tài khoản, phân quyền, tham số hệ thống",
+  AI_MANAGER: "Cấu hình kỹ thuật và giám sát hoạt động AI Agent (DEC-11)",
 };
 
 export default function LoginPage() {
   const users = all<{ id: number; name: string; email: string; role: Role; title: string | null }>(
     "SELECT id, name, email, role, title FROM users WHERE active = 1 ORDER BY id",
   );
+
   return (
     <div className="flex min-h-full items-center justify-center bg-[linear-gradient(135deg,#e8f1fb_0%,#f5f5f5_55%,#eef6ee_100%)] p-4">
-      <div className="w-full max-w-[460px] bg-surface p-10 shadow-[0_2px_6px_rgba(0,0,0,0.2)]">
-        <div className="mb-5 flex items-center gap-2 text-[15px] font-semibold text-ink-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded bg-brand text-white">
-            <Icon name="opportunity" size={18} />
+      <div className="w-full max-w-[500px] bg-surface p-8 shadow-[0_2px_12px_rgba(0,0,0,0.15)] rounded">
+        {/* Logo / Header */}
+        <div className="mb-6 flex items-center gap-2 text-[16px] font-semibold text-ink-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded bg-brand text-white">
+            <Icon name="opportunity" size={20} />
           </span>
           SMS Sales Hub
         </div>
-        <h1 className="mb-1 text-2xl font-semibold">Chọn tài khoản</h1>
-        <p className="mb-5 text-sm text-ink-3">Môi trường demo đồ án — mỗi tài khoản đại diện một vai trò trong quy trình Sales.</p>
-        <ul className="-mx-3">
+
+        <h1 className="mb-1 text-2xl font-bold text-ink">Đăng nhập hệ thống</h1>
+        <p className="mb-6 text-sm text-ink-3">Hệ thống Quản lý Bán hàng B2B SaaS tích hợp AI Agent.</p>
+
+        {/* Form đăng nhập email + mật khẩu (DEC-14, FR-97) */}
+        <form action={async (fd: FormData) => {
+          "use server";
+          await passwordLoginAction(undefined, fd);
+        }} className="mb-6 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-ink-2 mb-1">Email</label>
+            <input
+              name="email"
+              type="email"
+              placeholder="ten@sms.local"
+              required
+              className="w-full rounded border border-stroke px-3 py-2 text-sm outline-none focus:border-brand"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-ink-2 mb-1">Mật khẩu</label>
+            <input
+              name="password"
+              type="password"
+              placeholder="••••••••"
+              required
+              className="w-full rounded border border-stroke px-3 py-2 text-sm outline-none focus:border-brand"
+            />
+            <p className="mt-1 text-[11px] text-ink-3">Mật khẩu demo chung: <code className="bg-[#f0f0f0] px-1 py-0.5 rounded">Password123!</code></p>
+          </div>
+
+          <button
+            type="submit"
+            className="w-full rounded bg-brand py-2 text-sm font-semibold text-white hover:bg-brand-hover transition-colors"
+          >
+            Đăng nhập
+          </button>
+        </form>
+
+        {/* Hoặc đăng nhập nhanh bằng tài khoản demo */}
+        <div className="relative my-6 text-center">
+          <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-stroke"></div></div>
+          <span className="relative bg-surface px-2 text-xs font-medium text-ink-3">Hoặc chọn nhanh tài khoản demo</span>
+        </div>
+
+        <ul className="-mx-2 max-h-[260px] overflow-y-auto space-y-1 pr-1">
           {users.map((u) => (
             <li key={u.id}>
               <form action={loginAction}>
                 <input type="hidden" name="userId" value={u.id} />
-                <button className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-[#f0f0f0] focus-visible:bg-[#f0f0f0]">
-                  <Persona name={u.name} sub={`${ROLE_LABEL[u.role]} · ${ROLE_DESC[u.role]}`} size={40} />
+                <button
+                  type="submit"
+                  className="flex w-full items-center gap-3 rounded px-2 py-2 text-left hover:bg-[#f0f0f0] transition-colors"
+                >
+                  <Persona name={u.name} sub={`${ROLE_LABEL[u.role] || u.role} · ${ROLE_DESC[u.role] || u.email}`} size={36} />
                 </button>
               </form>
             </li>
           ))}
         </ul>
-        <p className="mt-6 border-t border-stroke pt-4 text-xs text-ink-3">
-          Bản triển khai thật sẽ đăng nhập qua SSO doanh nghiệp. Phiên đăng nhập được ký HMAC, quyền được kiểm tra ở server cho mọi thao tác.
-        </p>
+
+        <div className="mt-6 border-t border-stroke pt-4 text-[11px] text-ink-3">
+          Đăng nhập sử dụng mã hoá mật khẩu scrypt (DEC-14), phiên được ký HMAC SHA-256. Kiểm quyền RBAC chặt chẽ ở server.
+        </div>
       </div>
     </div>
   );

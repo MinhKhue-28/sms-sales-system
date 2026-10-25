@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { get } from "@/lib/db";
 import { ROLE_LABEL } from "@/lib/domain";
+import { getNavForRole } from "@/lib/nav";
 import { unreadCount } from "@/lib/services/admin";
 import { NavLink } from "@/components/client";
 import { Icon } from "@/components/icons";
@@ -57,23 +58,26 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {/* Site map (left navigation) */}
+        {/* Site map (left navigation - phân quyền theo vai trò) */}
         <nav className="hidden w-[232px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-stroke bg-surface-2 px-2 py-3 md:flex">
-          <NavLink href="/" icon="home">Trang chủ</NavLink>
-          <NavGroup>Của tôi</NavGroup>
-          <NavLink href="/ai-review" icon="sparkle" badge={pendingAi}>Kiểm duyệt AI</NavLink>
-          <NavLink href="/approvals" icon="approval" badge={pendingApprovals}>Phê duyệt</NavLink>
-          <NavGroup>Bán hàng</NavGroup>
-          <NavLink href="/leads" icon="lead">Leads</NavLink>
-          <NavLink href="/opportunities" icon="opportunity">Opportunities</NavLink>
-          <NavLink href="/accounts" icon="account">Accounts</NavLink>
-          <NavGroup>Thực hiện & thu tiền</NavGroup>
-          <NavLink href="/orders" icon="order">Orders</NavLink>
-          <NavLink href="/invoices" icon="invoice">Invoices</NavLink>
-          <NavGroup>Danh mục</NavGroup>
-          <NavLink href="/products" icon="product">Sản phẩm & bảng giá</NavLink>
-          <NavGroup>Hệ thống</NavGroup>
-          <NavLink href="/admin" icon="settings">Quản trị</NavLink>
+          {getNavForRole(user.role).map((group) => (
+            <div key={group.label} className="flex flex-col gap-0.5">
+              <NavGroup>{group.label}</NavGroup>
+              {group.items.map((item) => {
+                const badge =
+                  item.badgeKey === "ai"
+                    ? pendingAi
+                    : item.badgeKey === "approvals"
+                      ? pendingApprovals
+                      : undefined;
+                return (
+                  <NavLink key={item.href} href={item.href} icon={item.icon} badge={badge}>
+                    {item.label}
+                  </NavLink>
+                );
+              })}
+            </div>
+          ))}
           <div className="mt-auto px-3 pt-4">
             <Persona name={user.name} sub={user.title ?? ROLE_LABEL[user.role]} size={28} />
           </div>

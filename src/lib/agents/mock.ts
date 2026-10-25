@@ -34,37 +34,48 @@ export function mockQualificationAgent(ctx: ToolContext, log: ToolCallLog[]): st
   const webText = stripAccents(web.map((w) => w.snippet).join(" ").toLowerCase());
   const title = stripAccents((lead.contact_title ?? "").toLowerCase());
   const all = `${notes} ${acts} ${webText}`;
-  const evidence: { source: string; detail: string }[] = [];
+  const evidence: { ref: string; detail: string; quote: string }[] = [];
   const negative = has(webText, "cat giam", "tam dung");
 
   // --- Need
   let need = 8;
   if (has(all, "crm", "pipeline", "quan ly ban hang", "doi sales", "doi kinh doanh", "nhan vien kinh doanh", "trinh duoc vien", "bang tinh")) {
     need = 20;
-    evidence.push({ source: lead.notes.data ? "lead.notes" : "web_research", detail: "Có nhu cầu quản lý bán hàng / đội sales" });
+    const ref = lead.notes.data ? "lead.notes" : web[0]?.source ?? "web_research";
+    evidence.push({ ref, detail: "Có nhu cầu quản lý bán hàng / đội sales", quote: "Nhu cầu quản lý bán hàng" });
   }
   // --- Budget
   let budget = 8;
   if (has(all, "ngan sach", "budget", "trieu", "ty dong", "goi von", "mo rong")) {
     budget = 18;
-    evidence.push({ source: web[0]?.source ?? "lead.notes", detail: "Tín hiệu có ngân sách / đang mở rộng" });
+    const ref = web[0]?.source ?? (lead.notes.data ? "lead.notes" : "web_research");
+    evidence.push({ ref, detail: "Tín hiệu có ngân sách / đang mở rộng", quote: "Có ngân sách mở rộng" });
   }
   if (negative) {
     budget = 3;
-    evidence.push({ source: web[0]?.source ?? "web_research", detail: "Đang cắt giảm chi phí / tạm dừng dự án CNTT" });
+    evidence.push({ ref: web[0]?.source ?? "web_research", detail: "Đang cắt giảm chi phí / tạm dừng dự án CNTT", quote: "Cắt giảm chi phí" });
   }
   // --- Authority
   let authority = 6;
   if (has(title, "giam doc", "ceo", "cio", "cto", "director", "founder", "chu tich", "pho tong")) authority = 22;
   else if (has(title, "truong", "head", "manager", "quan ly")) authority = 14;
-  if (lead.contact_title) evidence.push({ source: "lead.contact_title", detail: `Chức danh: ${lead.contact_title}` });
+  if (lead.contact_title) {
+    evidence.push({ ref: "lead.contact_title", detail: `Chức danh: ${lead.contact_title}`, quote: lead.contact_title });
+  }
   // --- Timeline
   let timeline = 8;
   if (has(all, "q1", "q2", "quy 1", "quy 2", "2027", "trong thang", "ngay")) {
     timeline = 17;
-    evidence.push({ source: "lead.notes/web", detail: "Có mốc thời gian triển khai" });
+    evidence.push({ ref: web[0]?.source ?? (lead.notes.data ? "lead.notes" : "web_research"), detail: "Có mốc thời gian triển khai", quote: "Kế hoạch triển khai" });
   }
   if (negative) timeline = 3;
+
+  // Đảm bảo luôn có ít nhất 1 evidence từ lead
+  if (evidence.length === 0) {
+    if (lead.notes.data) evidence.push({ ref: "lead.notes", detail: "Ghi chú từ Lead", quote: "Ghi chú" });
+    else if (lead.company_name) evidence.push({ ref: "lead.company_name", detail: "Tên công ty", quote: lead.company_name });
+    else evidence.push({ ref: "web_research", detail: "Nghiên cứu web", quote: "Thông tin doanh nghiệp" });
+  }
 
   // --- Làm giàu dữ liệu (chỉ đề xuất trường trống)
   const fields: Record<string, string> = {};
@@ -73,14 +84,30 @@ export function mockQualificationAgent(ctx: ToolContext, log: ToolCallLog[]): st
   if (addr.normalized && addr.normalized !== lead.address && addr.confidence >= 0.8) fields.address = addr.normalized;
   if (web.length) fields.notes = `Nghiên cứu: ${web[0].snippet}`;
   if (Object.keys(fields).length) {
-    call("propose_enrichment", { fields, evidence: web.map((w) => ({ source: w.source, detail: w.title })) });
+    call("propose_enrichment", {
+      fields,
+      evidence: web.map((w) => ({ ref: w.source, detail: w.title, quote: w.title })),
+    });
   }
 
   const rationale =
     `Need ${need}/25, Budget ${budget}/25, Authority ${authority}/25, Timeline ${timeline}/25. ` +
     (web.length ? `Nguồn web: ${web[0].title}. ` : "Không tìm thấy thông tin công khai. ") +
     (dups.length ? `Cảnh báo trùng: ${dups.map((d) => `${d.label} (${d.reason})`).join("; ")}.` : "");
-  const scored = call("propose_bant_score", { budget, authority, need, timeline, rationale, evidence }) as { total: number };
+
+  const timelineBucket = timeline >= 15 ? "END_OF_QUARTER" : "UNKNOWN";
+  const confidence = authority >= 14 && need >= 15 ? 0.85 : 0.65;
+
+  const scored = call("propose_bant_score", {
+    budget: { score: budget, evidence },
+    authority: { score: authority, evidence },
+    need: { score: need, evidence },
+    timeline: { score: timeline, evidence },
+    timeline_bucket: timelineBucket,
+    confidence,
+    rationale,
+    evidence,
+  }) as { total: number; outcome: string };
   const total = scored.total;
 
   let next: string;
@@ -100,9 +127,11 @@ export function mockQualificationAgent(ctx: ToolContext, log: ToolCallLog[]): st
     const missing = [budget < 15 && "ngân sách dự kiến", authority < 15 && "người ra quyết định", timeline < 15 && "thời điểm dự kiến triển khai"].filter(Boolean);
     if (lead.email) {
       call("draft_email", {
+        to: lead.email,
         subject: `Trao đổi thêm về nhu cầu quản lý bán hàng của ${lead.company_name}`,
         body: `Kính gửi Anh/Chị,\n\nCảm ơn Anh/Chị đã quan tâm đến giải pháp Sales Cloud. Để đề xuất phương án phù hợp, Anh/Chị có thể chia sẻ thêm về ${missing.join(", ") || "kế hoạch triển khai"} không ạ?\n\nNếu thuận tiện, chúng tôi xin hẹn một cuộc gọi 20 phút trong tuần này.\n\nTrân trọng.`,
         purpose: "Bổ sung thông tin BANT còn thiếu",
+        facts_used: evidence,
       });
     }
     next = "soạn email hỏi thêm thông tin";
@@ -124,50 +153,95 @@ export function mockOpportunityAgent(ctx: ToolContext, log: ToolCallLog[]): stri
     competitors: { name: string; strengths: string | null }[];
   };
   call("get_admin_criteria");
-  const emails = (call("get_recent_emails") as Wrapped<{ window_days: number; emails: { subject: string; ref: string }[] }>).data;
+  const emailRes = call("get_recent_emails") as {
+    email_insight_status?: "OK" | "NO_INSIGHT";
+    window_days?: number;
+    emails?: { subject: string; ref: string }[];
+    untrusted_data?: boolean;
+    data?: { email_insight_status: "OK" | "NO_INSIGHT"; window_days: number; emails: { subject: string; ref: string }[] };
+  };
+  const emailsData = emailRes.data ?? (emailRes.emails ? { email_insight_status: emailRes.email_insight_status || "OK", window_days: emailRes.window_days || 30, emails: emailRes.emails } : { email_insight_status: "NO_INSIGHT" as const, window_days: 30, emails: [] });
+
   const meetings = (call("get_meeting_notes") as Wrapped<{ subject: string; ref: string }[]>).data;
   const web = (call("web_research", { query: o.account }) as Research).data;
   call("get_win_history");
 
-  const risks: { description: string; severity: "LOW" | "MEDIUM" | "HIGH" }[] = [];
-  const actions: string[] = [];
-  const sources: { ref: string; detail: string }[] = [];
+  const risks: { category: "MISSING_DECISION_MAKER" | "COMPETITOR" | "TIMELINE" | "TECH_CONSTRAINT" | "OTHER"; description: string; severity: "LOW" | "MEDIUM" | "HIGH"; sources?: { ref: string; detail: string; quote: string }[] }[] = [];
+  const actions: { action: string; owner_role: string; why: string }[] = [];
+  const sources: { ref: string; detail: string; quote: string }[] = [];
 
   if (!o.stakeholders.some((s) => s.role === "DECISION_MAKER")) {
-    risks.push({ description: "Chưa xác định/tiếp cận người ra quyết định", severity: "HIGH" });
-    actions.push("Đề nghị champion giới thiệu người quyết định và đặt lịch họp với họ");
+    risks.push({ category: "MISSING_DECISION_MAKER", description: "Chưa xác định/tiếp cận người ra quyết định", severity: "HIGH" });
+    actions.push({ action: "Đề nghị champion giới thiệu người quyết định và đặt lịch họp với họ", owner_role: "AE", why: "Bắt buộc theo HG6" });
   }
   if (!o.customer_need.data) {
-    risks.push({ description: "Chưa ghi nhận Customer Need", severity: "HIGH" });
-    actions.push("Tổ chức buổi khảo sát nhu cầu và ghi vào hồ sơ");
+    risks.push({ category: "OTHER", description: "Chưa ghi nhận Customer Need", severity: "HIGH" });
+    actions.push({ action: "Tổ chức buổi khảo sát nhu cầu và ghi vào hồ sơ", owner_role: "AE", why: "Mục kiểm soát Nhu cầu" });
   }
   for (const c of o.competitors) {
-    risks.push({ description: `Đang cạnh tranh với ${c.name}${c.strengths ? ` (mạnh: ${c.strengths})` : ""}`, severity: "MEDIUM" });
+    risks.push({ category: "COMPETITOR", description: `Đang cạnh tranh với ${c.name}${c.strengths ? ` (mạnh: ${c.strengths})` : ""}`, severity: "MEDIUM" });
   }
-  if (o.competitors.length) actions.push(`Chuẩn bị bảng so sánh với ${o.competitors[0].name} nhấn vào điểm khác biệt AI Agent`);
-  if (!emails.emails.length) {
-    risks.push({ description: `Không có email trao đổi trong ${emails.window_days} ngày`, severity: "MEDIUM" });
-    actions.push("Gửi follow-up tóm tắt cuộc họp gần nhất và đề xuất bước tiếp theo");
+  if (o.competitors.length) actions.push({ action: `Chuẩn bị bảng so sánh với ${o.competitors[0].name} nhấn vào điểm khác biệt AI Agent`, owner_role: "AE", why: "Cạnh tranh giải pháp" });
+  if (emailsData.emails.length === 0) {
+    risks.push({ category: "TIMELINE", description: `Không có email trao đổi trong ${emailsData.window_days} ngày`, severity: "MEDIUM" });
+    actions.push({ action: "Gửi follow-up tóm tắt cuộc họp gần nhất và đề xuất bước tiếp theo", owner_role: "AE", why: "Tương tác khách hàng" });
   }
   if (o.close_date && new Date(o.close_date).getTime() - Date.now() < 21 * 86400000 && o.stage === "DEVELOP") {
-    risks.push({ description: "Close date còn dưới 3 tuần nhưng vẫn ở Develop", severity: "HIGH" });
+    risks.push({ category: "TIMELINE", description: "Close date còn dưới 3 tuần nhưng vẫn ở Develop", severity: "HIGH" });
   }
-  if (!o.checklist.solution_confirmed) actions.push("Phối hợp Presales hoàn thiện và xác nhận Proposed Solution");
+  if (!o.checklist.solution_confirmed) actions.push({ action: "Phối hợp Presales hoàn thiện và xác nhận Proposed Solution", owner_role: "PRESALES", why: "Mục kiểm soát Giải pháp" });
 
-  emails.emails.slice(0, 3).forEach((e) => sources.push({ ref: e.ref, detail: e.subject }));
-  meetings.slice(0, 3).forEach((m) => sources.push({ ref: m.ref, detail: m.subject }));
-  web.forEach((w) => sources.push({ ref: w.source, detail: w.title }));
+  emailsData.emails.slice(0, 3).forEach((e) => sources.push({ ref: e.ref, detail: e.subject, quote: e.subject }));
+  meetings.slice(0, 3).forEach((m) => sources.push({ ref: m.ref, detail: m.subject, quote: m.subject }));
+  web.forEach((w) => sources.push({ ref: w.source, detail: w.title, quote: w.title }));
+
+  if (sources.length === 0) {
+    sources.push({ ref: "web_research", detail: "Nghiên cứu thị trường", quote: o.account });
+  }
 
   let importance: "LOW" | "MEDIUM" | "HIGH" = o.amount_vnd >= 500_000_000 ? "HIGH" : o.amount_vnd >= 150_000_000 ? "MEDIUM" : "LOW";
   if (importance === "MEDIUM" && web.some((w) => /mở rộng|gọi vốn|số hóa/i.test(w.snippet))) importance = "HIGH";
 
+  const importanceReason = o.amount_vnd >= 500_000_000
+    ? `Doanh thu ước tính ${o.amount_vnd.toLocaleString("vi-VN")} ₫ vượt ngưỡng 500 triệu`
+    : `Doanh thu ước tính ${o.amount_vnd.toLocaleString("vi-VN")} ₫`;
+
   const summary =
     `${o.account} – giá trị dự kiến ${o.amount_vnd.toLocaleString("vi-VN")} ₫, mức quan trọng ${importance}. ` +
     (web.length ? `Bối cảnh: ${web[0].snippet} ` : "") +
-    `Phát hiện ${risks.length} rủi ro; ${emails.emails.length} email và ${meetings.length} ghi chú họp được xem xét.`;
+    `Phát hiện ${risks.length} rủi ro; ${emailsData.emails.length} email và ${meetings.length} ghi chú họp được xem xét.`;
 
-  call("save_opportunity_research", { importance, summary, risks, next_actions: actions.slice(0, 3), sources });
-  if (risks.some((r) => r.severity === "HIGH")) call("notify_owner", { message: `Có ${risks.filter((r) => r.severity === "HIGH").length} rủi ro mức Cao cần xử lý` });
+  call("save_opportunity_research", {
+    importance,
+    importance_reason: importanceReason,
+    summary,
+    changes_since_last: null,
+    insights: {
+      stakeholder: o.stakeholders.length > 0
+        ? { text: `Đã xác định ${o.stakeholders.length} bên liên quan`, sources }
+        : { status: "NO_INSIGHT", reason: "Chưa thiết lập bên liên quan" },
+      competitor: o.competitors.length > 0
+        ? { text: `Cạnh tranh với ${o.competitors.map((c) => c.name).join(", ")}`, sources }
+        : { status: "NO_INSIGHT", reason: "Chưa phát hiện đối thủ cạnh tranh" },
+      account_overview: web.length > 0
+        ? { text: `Tổng quan doanh nghiệp: ${web[0].title}`, sources }
+        : { status: "NO_INSIGHT", reason: "Chưa có thông tin công khai về tài khoản" },
+      health: { text: `Giai đoạn ${o.stage}, ${risks.length} rủi ro được phát hiện`, sources },
+      pain_need: o.customer_need.data
+        ? { text: `Nhu cầu khách hàng: ${String(o.customer_need.data)}`, sources: [{ ref: "opportunity.customer_need", quote: "Nhu cầu", detail: "Nhu cầu" }] }
+        : { status: "NO_INSIGHT", reason: "Chưa ghi nhận nhu cầu chi tiết" },
+      product: { text: "Giải pháp SaaS B2B và dịch vụ triển khai phù hợp", sources },
+    },
+    risks,
+    next_actions: actions.slice(0, 3),
+    additional_actions: actions.slice(3),
+    email_insight_status: emailsData.email_insight_status,
+    sources,
+  });
+
+  if (risks.some((r) => r.severity === "HIGH")) {
+    call("notify_owner", { message: `Có ${risks.filter((r) => r.severity === "HIGH").length} rủi ro mức Cao cần xử lý` });
+  }
 
   return `Đã cập nhật Opportunity Research cho ${o.code}: mức ${importance}, ${risks.length} rủi ro, ${Math.min(actions.length, 3)} hành động ưu tiên. Chờ AE xác minh.`;
 }

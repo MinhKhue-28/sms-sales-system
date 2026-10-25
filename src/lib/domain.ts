@@ -6,16 +6,27 @@ export function assert(cond: unknown, message: string): asserts cond {
   if (!cond) throw new DomainError(message);
 }
 
-export type Role = "SALES" | "PRESALES" | "SALES_MANAGER" | "FINANCE" | "LEGAL" | "DELIVERY" | "ADMIN";
+export type Role =
+  | "SALES"
+  | "PRESALES"
+  | "PRESALES_MANAGER"
+  | "SALES_MANAGER"
+  | "FINANCE"
+  | "LEGAL"
+  | "DELIVERY"
+  | "ADMIN"
+  | "AI_MANAGER";
 
 export const ROLE_LABEL: Record<Role, string> = {
-  SALES: "Sales (SDR/AE)",
-  PRESALES: "Presales / SE",
-  SALES_MANAGER: "Sales Manager",
-  FINANCE: "Finance / Kế toán",
-  LEGAL: "Legal / Deal Desk",
-  DELIVERY: "Delivery / Kỹ thuật",
-  ADMIN: "Admin",
+  SALES: "Nhân viên kinh doanh",
+  PRESALES: "Chuyên viên tư vấn kỹ thuật",
+  PRESALES_MANAGER: "Quản lý tư vấn giải pháp",
+  SALES_MANAGER: "Quản lý kinh doanh",
+  FINANCE: "Nhân viên Tài chính – Kế toán",
+  LEGAL: "Nhân viên Pháp chế",
+  DELIVERY: "Nhân viên triển khai kỹ thuật",
+  ADMIN: "Người quản trị hệ thống",
+  AI_MANAGER: "Người quản lý tác nhân AI",
 };
 
 export const LEAD_STATUS: Record<string, string> = {
@@ -33,12 +44,22 @@ export const LEAD_SOURCE: Record<string, string> = {
   REFERRAL: "Giới thiệu",
 };
 
+/** Nhãn giai đoạn cơ hội theo bài (DEC-19) */
 export const OPP_STAGE: Record<string, string> = {
-  DEVELOP: "Develop",
-  PROPOSE: "Propose",
-  CLOSE: "Close",
-  WON: "Closed – Won",
-  LOST: "Closed – Lost",
+  DEVELOP: "Phát triển cơ hội",
+  PROPOSE: "Đề xuất giải pháp",
+  CLOSE: "Tạo đơn hàng",
+  WON: "Thành công",
+  LOST: "Thất bại",
+};
+
+/** Quy trình 5 bước tổng thể (DEC-19) */
+export const PROCESS_STAGE: Record<string, string> = {
+  QUALIFY: "Đánh giá khách hàng",
+  DEVELOP: "Phát triển cơ hội",
+  PROPOSE: "Đề xuất giải pháp",
+  CLOSE: "Tạo đơn hàng",
+  FULFILL: "Theo dõi hóa đơn và thanh toán",
 };
 
 export const QUOTE_STATUS: Record<string, string> = {
@@ -48,7 +69,23 @@ export const QUOTE_STATUS: Record<string, string> = {
   SENT: "Đã gửi khách",
   ACCEPTED: "Khách chấp thuận",
   REJECTED: "Khách từ chối",
+  DECLINED: "Từ chối",
   SUPERSEDED: "Đã thay thế",
+  EXPIRED: "Hết hiệu lực",
+};
+
+export const PROPOSAL_STATUS: Record<string, string> = {
+  DRAFT: "Nháp",
+  SENT: "Đã gửi khách",
+  ACCEPTED: "Khách chấp thuận",
+  SUPERSEDED: "Đã thay thế",
+};
+
+export const SIGNATURE_STATUS: Record<string, string> = {
+  PENDING: "Chờ ký",
+  SIGNED: "Đã ký",
+  DECLINED: "Từ chối ký",
+  EXPIRED: "Hết hạn ký",
 };
 
 export const ORDER_STATUS: Record<string, string> = {
@@ -56,6 +93,32 @@ export const ORDER_STATUS: Record<string, string> = {
   IN_FULFILLMENT: "Đang thực hiện",
   FULFILLED: "Hoàn tất bàn giao",
   CANCELLED: "Đã hủy",
+};
+
+export const BILLING_MILESTONE_STATUS: Record<string, string> = {
+  PENDING: "Chờ xuất hóa đơn",
+  INVOICED: "Đã xuất hóa đơn",
+  PAID: "Đã thanh toán",
+};
+
+export const HANDOVER_STATUS: Record<string, string> = {
+  PENDING: "Chờ bàn giao",
+  IN_PROGRESS: "Đang bàn giao",
+  COMPLETED: "Đã bàn giao",
+};
+
+export const HANDOVER_ITEM_CATEGORY: Record<string, string> = {
+  LICENSE: "Bản quyền & Giấy phép",
+  DEPLOYMENT: "Triển khai & Cấu hình",
+  TRAINING: "Đào tạo & Hướng dẫn",
+  DOCUMENTATION: "Tài liệu bàn giao",
+};
+
+export const HANDOVER_ITEM_STATUS: Record<string, string> = {
+  PENDING: "Chưa nghiệm thu",
+  IN_PROGRESS: "Đang nghiệm thu",
+  ACCEPTED: "Đã nghiệm thu",
+  REJECTED: "Cần xử lý lại",
 };
 
 export const INVOICE_STATUS: Record<string, string> = {
@@ -84,6 +147,15 @@ export const STAKEHOLDER_ROLE: Record<string, string> = {
   CHAMPION: "Người ủng hộ",
   BLOCKER: "Người cản trở",
   USER: "Người dùng",
+  SPONSOR: "Nhà tài trợ ngân sách",
+  GATEKEEPER: "Người gác cổng",
+};
+
+export const RISK_STATUS: Record<string, string> = {
+  OPEN: "Chưa xử lý",
+  MITIGATED: "Đã giảm thiểu",
+  RESOLVED: "Đã giải quyết",
+  DISMISSED: "Bỏ qua",
 };
 
 export const LEVEL: Record<string, string> = { LOW: "Thấp", MEDIUM: "Trung bình", HIGH: "Cao" };
@@ -92,6 +164,7 @@ export const APPROVAL_KIND: Record<string, string> = {
   QUOTE_DISCOUNT: "Duyệt chiết khấu báo giá",
   OPP_STAGE_GATE: "Rà soát chuyển Develop → Propose",
   LEGAL_REVIEW: "Rà soát điều khoản",
+  EXPERT_REVIEW: "Rà soát chuyên môn giải pháp",
 };
 
 export const SUGGESTION_KIND: Record<string, string> = {
@@ -112,13 +185,22 @@ export const DISQUALIFY_REASONS = [
   "Khác",
 ];
 
+export const LOST_REASONS_BR27 = [
+  "Mất vào đối thủ",
+  "Không có ngân sách",
+  "Khách hoãn hoặc dừng dự án",
+  "Không đáp ứng yêu cầu",
+  "Bàn giao sai chuẩn từ bước đánh giá",
+  "Khác",
+] as const;
+
 export const LOST_REASONS = [
+  ...LOST_REASONS_BR27,
   "Thua đối thủ",
   "Giá không phù hợp",
   "Khách hoãn dự án",
   "Không đáp ứng yêu cầu kỹ thuật",
   "Mất liên lạc",
-  "Khác",
 ];
 
 // ===== Chuẩn hóa & kiểm tra trùng =====
